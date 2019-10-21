@@ -58,12 +58,11 @@ public partial class MyExternalScript : GH_ScriptInstance
 
         Robot bot = new Robot(x, g, r);
 
-        if (or) bot.Solve_IK(t, 1, i);
+        if (or) bot.Solve_IK(t, 1, 0.1, i);
         else bot.Solve_IK(t.Origin, 1, i);
         bot.ApplyBodies();
         Print("iterations = {0}", bot.Iterations);
-        Print("ErrorSq = {0}", bot.ErrorSq);
-        Print("Step = {0}", bot.Step);
+        Print("ErrorSq = {0}", bot.DistError);
 
         A = bot.ErrorLines;
         B = bot.EndFrame;
@@ -77,7 +76,7 @@ public partial class MyExternalScript : GH_ScriptInstance
     public class Robot
     {
         public List<Line> Axes = new List<Line>();
-        public DataTree<double> JointRange = new DataTree<double>();
+        public DataTree<double> JointRange = new DataTree<double>();            
         public List<Plane> OriginalAxisPlanes = new List<Plane>();
         public List<Plane> AxisPlanes = new List<Plane>();
         public DataTree<Brep> OriginalBodies = new DataTree<Brep>();
@@ -85,15 +84,12 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<Line> Links = new List<Line>();
         public List<double> JointAngles = new List<double>();
         public List<Line> ErrorLines = new List<Line> { new Line(), new Line(), new Line() };
-        public double ErrorSq;
-        public double ErrorSqOld = 1000000000;
+        public double DistError;        //actually square of dist to shorten calculation time
+        public double AngleError;
         public Point3d EndPoint;
         public Plane EndFrame;
         public Point3d TargetPoint;
-        public Plane TargetPlane;
-        public double Step = .5;
-        public List<double> Steps = new List<double>();
-
+        public Plane TargetFrame;
         public int Iterations;
 
         public Robot(List<Line> axes, DataTree<double> jointRange)           //bare skeleton
@@ -159,7 +155,6 @@ public partial class MyExternalScript : GH_ScriptInstance
                     axis.Transform(rot);
                     link.Transform(rot);
                     plane.Transform(rot);
-
                     Axes[j] = axis;
                     Links[j] = link;
                     AxisPlanes[j] = plane;
@@ -175,8 +170,8 @@ public partial class MyExternalScript : GH_ScriptInstance
             {
                 stepCCD();
                 Point3d endPoint = new Point3d(Links[Links.Count - 1].To);
-                ErrorSq = Math.Abs(endPoint.X - target.X) + Math.Abs(endPoint.Y - target.Y) + Math.Abs(endPoint.Z - target.Z);
-                if (ErrorSq < threshhold)
+                DistError = Math.Abs(endPoint.X - target.X) + Math.Abs(endPoint.Y - target.Y) + Math.Abs(endPoint.Z - target.Z);
+                if (DistError < threshhold)
                 {
                     Iterations = i;
                     break;
@@ -184,151 +179,95 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
         }
 
-        public void Solve_IK(Plane target, double threshhold = 0.1, int iterations = 5000)
+
+        public void Solve_IK(Plane target, double distThreshhold = 0.1, double angleThreshhold = 0.01, int iterations = 5000)            // Location Only
         {
-            Solve_IK(target.Origin);
-            TargetPlane = target;
-            threshhold = Math.Pow(threshhold, 2);
+            TargetFrame = target;
+            distThreshhold = Math.Pow(distThreshhold, 2);
             for (int i = 0; i < iterations; i++)
             {
-                stepJak();                          //Finds Error
-                if (ErrorSq > ErrorSqOld * 1.2) Step /= 2;
-                ErrorSqOld = ErrorSq;
+                stepCCD_Orient();
                 Point3d endPoint = new Point3d(Links[Links.Count - 1].To);
+                DistError = Math.Abs(EndFrame.Origin.X - target.Origin.X) + Math.Abs(EndFrame.Origin.Y - target.Origin.Y) + Math.Abs(EndFrame.Origin.Z - target.Origin.Z);
+                AngleError = Vector3d.VectorAngle(EndFrame.XAxis, TargetFrame.XAxis) + Vector3d.VectorAngle(EndFrame.YAxis, TargetFrame.YAxis);
                 Iterations = i;
-                if (ErrorSq < threshhold)
-                {
+                if (DistError < distThreshhold && AngleError < angleThreshhold)
                     break;
-                }
-
             }
         }
-
-        //private List<Vector3d> ErrorVectors()
-        //{
-        //    //target plane points
-        //    Point3d targetCP = TargetPlane.Origin;
-        //    Point3d targetX = targetCP + TargetPlane.XAxis * 100;
-        //    Point3d targetY = targetCP + TargetPlane.YAxis * 100;
-
-        //    //end effector plane pts
-        //    Point3d eeCP = EndFrame.Origin;
-        //    Point3d eeX = eeCP + EndFrame.XAxis * 100;
-        //    Point3d eeY = eeCP + EndFrame.YAxis * 100;
-
-        //    //error vectors/lines
-        //    Vector3d errorCP = targetCP - eeCP;
-        //    Vector3d errorX = targetX - eeX;
-        //    Vector3d errorY = targetY - eeY;
-
-        //    ErrorSq = Math.Abs(errorCP.X) + Math.Abs(errorCP.Y) + Math.Abs(errorCP.Z) + Math.Abs(errorX.X) + Math.Abs(errorX.Y) + Math.Abs(errorX.Z) + Math.Abs(errorY.X) + Math.Abs(errorY.Y) + Math.Abs(errorY.Z);
-
-        //    ErrorLines[0] = (new Line(eeCP, errorCP));
-        //    ErrorLines[1] = (new Line(eeX, errorX));
-        //    ErrorLines[2] = (new Line(eeY, errorY));
-
-        //    List<Vector3d> vectorsOut = new List<Vector3d>();
-        //    vectorsOut.Add(errorCP);
-        //    vectorsOut.Add(errorX);
-        //    vectorsOut.Add(errorY);
-
-        //    return vectorsOut;
-        //}
-
-
-
-
-        public List<double> axisDelta()
+        private void stepCCD_Orient()
         {
-            Point3d targetCP = TargetPlane.Origin;
-            Point3d targetX = targetCP + TargetPlane.XAxis * 100;
-            Point3d targetY = targetCP + TargetPlane.YAxis * 100;
-
-            //end effector plane pts
-            Point3d eeCP = EndFrame.Origin;
-            Point3d eeX = eeCP + EndFrame.XAxis * 100;
-            Point3d eeY = eeCP + EndFrame.YAxis * 100;
-
-            //error vectors/lines
-            Vector3d errorCP = targetCP - eeCP;
-            Vector3d errorX = targetX - eeX;
-            Vector3d errorY = targetY - eeY;
-
-            ErrorSq = Math.Abs(errorCP.X) + Math.Abs(errorCP.Y) + Math.Abs(errorCP.Z) + Math.Abs(errorX.X) + Math.Abs(errorX.Y) + Math.Abs(errorX.Z) + Math.Abs(errorY.X) + Math.Abs(errorY.Y) + Math.Abs(errorY.Z);
-            //RhinoApp.WriteLine("ErrorSq = {0}", ErrorSq);
-            //RhinoApp.WriteLine("ErrorSqOld = {0}", ErrorSqOld.ToString());
-
-            //List<Vector3d> vectorsOut = new List<Vector3d>();
-            //vectorsOut.Add(errorCP);
-            //vectorsOut.Add(errorX);
-            //vectorsOut.Add(errorY);
-            //List<Vector3d> errorVectors = new List<Vector3d>(ErrorVectors());
-
-            List<double> deltaTemp = new List<double>();
-
-            for (int i = 0; i < Axes.Count; i++)
+            for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----X
             {
-                //vector axis to end effector points
-                Vector3d jointToEndCP = eeCP - Axes[i].ClosestPoint(eeCP, false);
-                Vector3d jointToEndX = eeX - Axes[i].ClosestPoint(eeX, false);
-                Vector3d jointToEndY = eeY - Axes[i].ClosestPoint(eeY, false);
-
-                //angular vector of rotation about axis[i]
-                Vector3d jakobianCP = Vector3d.CrossProduct(Axes[i].Direction, jointToEndCP);
-                Vector3d jakobianX = Vector3d.CrossProduct(Axes[i].Direction, jointToEndX);
-                Vector3d jakobianY = Vector3d.CrossProduct(Axes[i].Direction, jointToEndY);
-                //jakOut.Add(new Line(eeCP, jakobianCP));
-
-                jakobianCP.Unitize();
-                jakobianX.Unitize();
-                jakobianY.Unitize();
-
-                double dotCP = Vector3d.Multiply(errorCP, jakobianCP);
-                double dotX = Vector3d.Multiply(errorX, jakobianX);
-                double dotY = Vector3d.Multiply(errorY, jakobianY);
-
-                double thetaCP = 0;
-                if (jointToEndCP.Length > 0) thetaCP = Math.Atan(dotCP / jointToEndCP.Length);
-                double thetaX = 0;
-                if (jointToEndX.Length > 0) thetaX = Math.Atan(dotX / jointToEndX.Length);
-                double thetaY = 0;
-                if (jointToEndY.Length > 0) thetaY = Math.Atan(dotY / jointToEndY.Length);
-
-                double CPweight = 5;
-                double deltaAvg = (thetaCP * CPweight + thetaX + thetaY) / (2 + CPweight);
-                deltaAvg *= Step;
-                deltaTemp.Add(deltaAvg);
-            }
-
-            return deltaTemp;
-        }
-
-
-
-        private void stepJak()
-        {
-            Steps = axisDelta();                                // also finds error
-            for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis
-            {
-                if (JointRange.Branch(new GH_Path(i))[0] != 0 && (JointRange.Branch(new GH_Path(i))[0] > (JointAngles[i] + Steps[i]) || (JointAngles[i] + Steps[i]) > JointRange.Branch(new GH_Path(i))[1]))
-                    Steps[i] = JointRange.Branch(new GH_Path(i))[1] - JointAngles[i];
-                var rot = Transform.Rotation(Steps[i], Axes[i].Direction, Axes[i].From);
-                JointAngles[i] += Steps[i];
+                Point3d targetX = TargetFrame.Origin + TargetFrame.XAxis * 100;
+                Point3d eeX = EndFrame.Origin + EndFrame.XAxis * 100;
+                var rot = Rotate(i, targetX, eeX);
                 EndFrame.Transform(rot);
 
                 for (int j = i; j < Axes.Count; j++)        //move link and children
                 {
-                    Line axis = Axes[j];
-                    Line link = Links[j];
-                    Plane plane = AxisPlanes[j];
-                    axis.Transform(rot);
-                    link.Transform(rot);
-                    plane.Transform(rot);
-                    Axes[j] = axis;
-                    Links[j] = link;
-                    AxisPlanes[j] = plane;
+                    rotateAxes(j, rot);
                 }
             }
+
+            for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----Y
+            {
+                Point3d targetY = TargetFrame.Origin + TargetFrame.YAxis * 100;
+                Point3d eeY = EndFrame.Origin + EndFrame.YAxis * 100;
+                var rot = Rotate(i, targetY, eeY);
+                EndFrame.Transform(rot);
+                for (int j = i; j < Axes.Count; j++)        //move link and children
+                {
+                    rotateAxes(j, rot);
+                }
+            }
+
+            //for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----ORIGIN
+            //{
+            //    var rot = Rotate(i, TargetFrame.Origin, EndFrame.Origin);
+            //    EndFrame.Transform(rot);
+            //    for (int j = i; j < Axes.Count; j++)        //move link and children
+            //    {
+            //        rotateAxes(j, rot);
+            //    }
+            //}
+
+            for (int i = 0; i <= Axes.Count - 1; i++)           //for each axis-----ORIGIN
+            {
+                var rot = Rotate(i, TargetFrame.Origin, EndFrame.Origin);
+                EndFrame.Transform(rot);
+                for (int j = i; j < Axes.Count; j++)        //move link and children
+                {
+                    rotateAxes(j, rot);
+                }
+            }
+        }
+
+        private Transform Rotate(int i, Point3d target, Point3d end)
+        {
+            Vector3d jointToEnd = new Vector3d(end - Axes[i].From);
+            Vector3d jointToGoal = new Vector3d(target - Axes[i].From);
+
+            double angle = Vector3d.VectorAngle(jointToEnd, jointToGoal, AxisPlanes[i]);
+
+            if (angle > Math.PI) angle = angle - (2 * Math.PI);
+            if (JointRange.Branch(new GH_Path(i))[0] != 0 && (JointRange.Branch(new GH_Path(i))[0] > (JointAngles[i] + angle) || (JointAngles[i] + angle) > JointRange.Branch(new GH_Path(i))[1]))
+                angle = JointRange.Branch(new GH_Path(i))[1] - JointAngles[i];
+            var rot = Transform.Rotation(angle , Axes[i].Direction, Axes[i].From);
+            JointAngles[i] += angle;
+            return rot;
+        }
+        private void rotateAxes(int i, Transform rot)
+        {
+            Line axis = Axes[i];
+            Line link = Links[i];
+            Plane plane = AxisPlanes[i];
+            axis.Transform(rot);
+            link.Transform(rot);
+            plane.Transform(rot);
+            Axes[i] = axis;
+            Links[i] = link;
+            AxisPlanes[i] = plane;
         }
 
         public void ApplyBodies()
