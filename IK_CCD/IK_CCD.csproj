@@ -109,7 +109,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Templates\IK_Main.cs" />
-    <Compile Include="Templates\MyExternalScriptExtra.cs" />
     <Compile Include="Templates_WithoutCustomUsingStatements\MyExternalScriptOLDExtra.cs" />
     <Compile Include="Templates_WithoutCustomUsingStatements\MyExternalScriptOLD.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
