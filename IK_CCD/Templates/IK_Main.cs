@@ -74,13 +74,20 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (ed == 0) ed = 0.1;
             if (ea == 0) ea = 0.01;
 
-            if (or) bot.Solve_IK(t, ed, ea, i);
-            else bot.Solve_IK(t.Origin, 1, i);
-            Print("solve OK");
+            if (or)
+            {
+                if (bot.Solve_IK(t, ed, ea, i)) Print("solve OK");
+            }
+            else
+            {
+                if (bot.Solve_IK(t.Origin, 1, i)) Print("solve OK");
+            }
             bot.ApplyBodies();
             Print("iterations = {0}", bot.Iterations);
             Print("ErrorSq = {0}", bot.DistError);
+            Print("AngleError = {0}", bot.AngleError);
         }
+        bot.Iterations = 0;
         A = bot.Links;
         B = bot.EndFrame;
         C = bot.Bodies;
@@ -248,23 +255,27 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
         }
 
-        public void Solve_IK(Point3d target, double threshhold = 0.1, int iterations = 5000)            // Location Only
+        public bool Solve_IK(Point3d target, double threshhold = 0.1, int iterations = 5000)            // Location Only
         {
+            bool success = false;
             TargetPoint = target;
             threshhold = Math.Pow(threshhold, 2);
             for (int i = Iterations; i < iterations; i++)
             {
                 stepCCD();
+                Iterations = i;
                 if (DistError < threshhold)
                 {
-                    Iterations = i;
+                    success = true;
                     break;
                 }
             }
+            return success;
         }
 
-        public void Solve_IK(Plane target, double distThreshhold = 0.1, double angleThreshhold = 0.01, int iterations = 5000)            // Location Only
+        public bool Solve_IK(Plane target, double distThreshhold = 0.1, double angleThreshhold = 0.01, int iterations = 5000)            // Location Only
         {
+            bool success = false;
             TargetFrame = target;
             distThreshhold = Math.Pow(distThreshhold, 2);
             for (int i = Iterations; i < iterations; i++)
@@ -272,8 +283,12 @@ public partial class MyExternalScript : GH_ScriptInstance
                 stepCCD_Orient();
                 Iterations = i;
                 if (DistError < distThreshhold && AngleError < angleThreshhold)
+                {
+                    success = true;
                     break;
+                }
             }
+            return success;
         }
 
         private void stepCCD_Orient()
@@ -334,13 +349,13 @@ public partial class MyExternalScript : GH_ScriptInstance
             Vector3d jointToEnd = new Vector3d(end - Axes[i].From);
             Vector3d jointToGoal = new Vector3d(target - Axes[i].From);
             double angle = Vector3d.VectorAngle(jointToEnd, jointToGoal, AxisPlanes[i]);
-            RhinoApp.WriteLine("angle[{1}] = {0}", angle, i);
+            //RhinoApp.WriteLine("angle[{1}] = {0}", angle, i);
 
             if (angle > Math.PI) angle = angle - (2 * Math.PI);
             if (JointRange.Branch(new GH_Path(i))[0] != 0 && (JointRange.Branch(new GH_Path(i))[0] > (JointAngles[i] + angle) || (JointAngles[i] + angle) > JointRange.Branch(new GH_Path(i))[1]))
                 angle = JointRange.Branch(new GH_Path(i))[1] - JointAngles[i];
             var rot = Transform.Rotation(angle, Axes[i].Direction, Axes[i].From);
-            RhinoApp.WriteLine("fixed angle[{1}] = {0}", angle, i);
+            //RhinoApp.WriteLine("fixed angle[{1}] = {0}", angle, i);
             JointAngles[i] += angle;
             return rot;
         }
