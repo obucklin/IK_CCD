@@ -57,9 +57,11 @@ public partial class MyExternalScript : GH_ScriptInstance
     #endregion
 
 
-    private void RunScript(bool reset, List<Line> x, Plane t, bool or, DataTree<Brep> g, DataTree<double> r, int i, double ed, double ea, ref object A, ref object B, ref object C)
+    private void RunScript(bool reset, List<Line> axes, Plane target, bool orient, DataTree<Brep> bodies, DataTree<double> range, int iterations, double error, double angleError, ref object Axes, ref object EndPlane, ref object Bodies, ref object Solved)
     {
         // <Custom code>
+
+        bool solvedTemp = false;
         if (reset)
         {
             bot.Clear();
@@ -69,29 +71,31 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             if (!bot.IsSet)
             {
-                bot.InitializeBot(x, g, r);
+                bot.InitializeBot(axes, bodies, range);
             }
-            if (ed == 0) ed = 0.1;
-            if (ea == 0) ea = 0.01;
+            if (error == 0) error = 0.1;
+            if (angleError == 0) angleError = 0.01;
 
-            if (or)
+            if (orient)
             {
-                if (bot.Solve_IK(t, ed, ea, i)) Print("solve OK");
+                solvedTemp = bot.Solve_IK(target, error, angleError, iterations);
             }
             else
             {
-                if (bot.Solve_IK(t.Origin, 1, i)) Print("solve OK");
+                solvedTemp = bot.Solve_IK(target.Origin, 1, iterations);
             }
             bot.ApplyBodies();
+            if (solvedTemp) Print("solve OK");
+
             Print("iterations = {0}", bot.Iterations);
             Print("ErrorSq = {0}", bot.DistError);
             Print("AngleError = {0}", bot.AngleError);
         }
         bot.Iterations = 0;
-        A = bot.Links;
-        B = bot.EndFrame;
-        C = bot.Bodies;
-
+        Axes = bot.Links;
+        EndPlane = bot.EndFrame;
+        Bodies = bot.Bodies;
+        Solved = solvedTemp;
         // </Custom code>
     }
 
