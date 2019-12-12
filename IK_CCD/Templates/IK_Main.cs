@@ -11,6 +11,7 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 
 // <Custom "using" statements>
+using System.Linq;
 
 
 
@@ -71,6 +72,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             if (!bot.IsSet)
             {
+
                 bot.InitializeBot(axes, bodies, range);
             }
             if (error == 0) error = 0.1;
@@ -80,24 +82,21 @@ public partial class MyExternalScript : GH_ScriptInstance
             {
                 if (orient)
                 {
-                    solvedTemp = bot.Solve_IK(target, error, angleError, iterations);
                     RhinoApp.WriteLine("Solving with orient");
-
+                    solvedTemp = bot.Solve_IK(target, error, angleError, iterations);
                 }
                 else
                 {
-                    solvedTemp = bot.Solve_IK(target.Origin, 1, iterations);
                     RhinoApp.WriteLine("Solving no orient");
-
+                    solvedTemp = bot.Solve_IK(target.Origin, 1, iterations);
                 }
             }
             else
             {
                 if (orient)
                 {
-                    solvedTemp = bot.Solve_IK(target, structure, error, angleError, iterations);
                     RhinoApp.WriteLine("Solving Line");
-
+                    solvedTemp = bot.Solve_IK(target, structure, error, angleError, iterations);
                 }
             }
 
@@ -142,14 +141,13 @@ public partial class MyExternalScript : GH_ScriptInstance
         private Point3d targetPoint;
         private Plane targetFrame;
         private Plane targetPlane;
-        private Plane tempTargetFrame;
         private int iterations;
         private bool isSet = false;
 
         public List<Line> OriginalAxes { get { return axes; } set { axes = value; } }
         public List<Line> Axes { get { return axes; } set { axes = value; } }
         public List<Line> OriginalLinks { get { return originalLinks; } set { originalLinks = value; } }
-        public List<Line> Links { get { return links; } set { links = value; } }        
+        public List<Line> Links { get { return links; } set { links = value; } }
         public List<Plane> OriginalAxisPlanes { get { return originalAxisPlanes; } set { originalAxisPlanes = value; } }
         public List<Plane> AxisPlanes { get { return axisPlanes; } set { axisPlanes = value; } }
         public Plane OriginalEndFrame { get { return originalEndFrame; } set { originalEndFrame = value; } }
@@ -174,6 +172,12 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             public List<double> JointAnglesTemp;
             public double TargetDistanceTemp;
+
+            public robotState(double dist)
+            {
+                TargetDistanceTemp = dist;
+                JointAnglesTemp = new List<double>();
+            }
         }
         public bool IsSet { get { return isSet; } set { isSet = value; } }
         //public List<RobotState> RobotStates { get { return robotStates; } set { robotStates = value; } }
@@ -182,82 +186,62 @@ public partial class MyExternalScript : GH_ScriptInstance
         public Robot() { }
         public Robot(List<Line> axes, DataTree<double> jointRange)           //bare skeleton
         {
-            Axes = axes;
+            OriginalAxes = axes;
             JointRange = jointRange;
 
-            for (int i = 0; i < Axes.Count - 1; i++)
+            for (int i = 0; i < OriginalAxes.Count - 1; i++)
             {
-                Links.Add(new Line(Axes[i].From, Axes[i + 1].From));
+                OriginalLinks.Add(new Line(OriginalAxes[i].From, OriginalAxes[i + 1].From));
                 JointAngles.Add(0.0);
             }
 
-            Line endLink = new Line(Links[Links.Count - 1].To, new Vector3d(Links[Links.Count - 1].To - Links[Links.Count - 1].From), 30);
-            Links.Add(endLink);
+            Line endLink = new Line(OriginalLinks[OriginalLinks.Count - 1].To, new Vector3d(OriginalLinks[OriginalLinks.Count - 1].To - OriginalLinks[OriginalLinks.Count - 1].From), 30);
+            OriginalLinks.Add(endLink);
             EndFrame = new Plane(endLink.To, endLink.Direction);
+            RhinoApp.WriteLine("OriginalLinks count = {0}", OriginalLinks.Count);
+
         }
         public Robot(List<Line> axes, DataTree<Brep> bodies, DataTree<double> jointRange)        //with planes for applying geometry
         {
             OriginalBodies = bodies;
             OriginalAxes = axes;
-            Axes = axes;
             JointRange = jointRange;
-            foreach (Line l in Axes)
+            foreach (Line l in OriginalAxes)
             {
                 OriginalAxisPlanes.Add(new Plane(l.From, l.Direction));
                 AxisPlanes.Add(new Plane(l.From, l.Direction));
                 JointAngles.Add(0.0);
             }
-            for (int i = 0; i < Axes.Count - 1; i++)
-                Links.Add(new Line(Axes[i].From, Axes[i + 1].From));
+            for (int i = 0; i < OriginalAxes.Count - 1; i++)
+                OriginalLinks.Add(new Line(OriginalAxes[i].From, OriginalAxes[i + 1].From));
 
-            Line endLink = new Line(Links[Links.Count - 1].To, new Vector3d(Links[Links.Count - 1].To - Links[Links.Count - 1].From), 30);
-            Links.Add(endLink);
+            Line endLink = new Line(OriginalLinks[OriginalLinks.Count - 1].To, new Vector3d(OriginalLinks[OriginalLinks.Count - 1].To - OriginalLinks[OriginalLinks.Count - 1].From), 30);
+            OriginalLinks.Add(endLink);
             EndFrame = new Plane(endLink.To, endLink.Direction);
+            RhinoApp.WriteLine("OriginalLinks count = {0}", OriginalLinks.Count);
+
 
         }
 
-        //public Robot DuplicateRobot()
-        //{
-        //    Robot robotTemp = new Robot();
-        //    //robotTemp = this;
-        //    foreach (Line l in Axes) robotTemp.Axes.Add(l);
-        //    foreach (Line l in Links) robotTemp.Links.Add(l);
-        //    foreach (Plane p in AxisPlanes) robotTemp.AxisPlanes.Add(p);
-        //    foreach (double d in JointAngles) robotTemp.JointAngles.Add(d);
-
-        //    return robotTemp;
-        //}
-        //public class RobotState : Robot
-        //{
-        //    public RobotState() 
-        //    {
-        //        this.Axes = Axes;
-        //        this.Links = Links;
-        //        this.AxisPlanes = AxisPlanes;
-        //        this.EndFrame = EndFrame;
-        //        this.JointAngles = JointAngles;
-        //    }
-        //}
         public void InitializeBot(List<Line> axes, DataTree<Brep> bodies, DataTree<double> jointRange)
         {
             OriginalBodies = bodies;
             OriginalAxes = axes;
-            Axes = axes;
             JointRange = jointRange;
-            foreach (Line l in Axes)
+            foreach (Line l in OriginalAxes)
             {
                 OriginalAxisPlanes.Add(new Plane(l.From, l.Direction));
                 AxisPlanes.Add(new Plane(l.From, l.Direction));
                 JointAngles.Add(0.0);
             }
-            for (int i = 0; i < Axes.Count - 1; i++)
-                Links.Add(new Line(Axes[i].From, Axes[i + 1].From));
+            for (int i = 0; i < OriginalAxes.Count - 1; i++)
+                OriginalLinks.Add(new Line(OriginalAxes[i].From, OriginalAxes[i + 1].From));
 
-            Line endLink = new Line(Links[Links.Count - 1].To, new Vector3d(Links[Links.Count - 1].To - Links[Links.Count - 1].From), 30);
-            Links.Add(endLink);
+            Line endLink = new Line(OriginalLinks[OriginalLinks.Count - 1].To, new Vector3d(OriginalLinks[OriginalLinks.Count - 1].To - OriginalLinks[OriginalLinks.Count - 1].From), 30);
+            OriginalLinks.Add(endLink);
             EndFrame = new Plane(endLink.To, endLink.Direction);
             IsSet = true;
-            RhinoApp.WriteLine("init");
+            RhinoApp.WriteLine("initializing");
         }
         public void Clear()
         {
@@ -267,6 +251,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             AxisPlanes.Clear();
             OriginalBodies.Clear();
             Bodies.Clear();
+            OriginalLinks.Clear();
             Links.Clear();
             JointAngles.Clear();
             Iterations = 0;
@@ -299,6 +284,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             distThreshhold = Math.Pow(distThreshhold, 2);
             for (int i = Iterations; i < maxIterations; i++)
             {
+
                 stepCCD_Orient(i);
                 Iterations = i;
                 if (DistError < distThreshhold && AngleError < angleThreshhold)
@@ -313,7 +299,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         public bool Solve_IK(Plane target, DataTree<Line> structure, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)            // on Line Only
         {
-            bool success = false;
+            bool successOut = false;
             TargetPlane = target;
             TargetFrame = target;
             double oldDist = 1000000.0;
@@ -324,11 +310,13 @@ public partial class MyExternalScript : GH_ScriptInstance
                 for (int j = 0; j < 5; j++)
                     stepCCD();
             }
-
+            robotState beforeState = new robotState();
+            foreach (double d in JointAngles) beforeState.JointAnglesTemp.Add(d);
             TargetFrame = new Plane(structure.Branch(0)[0].ClosestPoint(EndFrame.Origin, true), structure.Branch(0)[0].Direction, structure.Branch(0)[1].Direction);
-
+            List<robotState> states = new List<robotState>();
             for (int n = 0; n < 4; n++)
             {
+                bool success = false;
                 TargetFrame.Rotate(Math.PI / 2, structure.Branch(0)[0].Direction, structure.Branch(0)[0].From);
                 for (int i = Iterations; i < maxIterations; i++)
                 {
@@ -338,18 +326,31 @@ public partial class MyExternalScript : GH_ScriptInstance
                     Iterations = i;
                     if (DistError < distThreshhold && AngleError < angleThreshhold)
                     {
-                        if(oldDist > TargetDistance)
-                        {
-                            oldDist = TargetDistance;
 
-                        }
                         success = true;
                         break;
                     }
                 }
+                if (success)
+                {
+                    robotState stateTemp = new robotState();
+                    foreach (double d in JointAngles) stateTemp.JointAnglesTemp.Add(d);
+                    stateTemp.TargetDistanceTemp = EndFrame.Origin.DistanceTo(TargetPlane.Origin);
+                    states.Add(stateTemp);
+                }
+                successOut |= success;
             }
+            states = states.OrderBy(z => z.TargetDistanceTemp).ToList();
+            JointAngles.Clear();
+            foreach (double d in states[0].JointAnglesTemp) JointAngles.Add(d);
+            for (int i = 0; i <= Axes.Count - 1; i++)           //for each axis-----ORIGIN  
+            {
+                var rot = Transform.Rotation(JointAngles[i], Axes[i].Direction, Axes[i].From);
+                rotateAxes(i, rot);
+            }
+
             //RhinoApp.WriteLine("step {0} => case {1}", Iterations, Iterations % 5);
-            return success;
+            return successOut;
         }
 
         private void stepCCD()     //Location Only
@@ -373,20 +374,23 @@ public partial class MyExternalScript : GH_ScriptInstance
                     {
                         for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----X
                         {
-                            Point3d targetZ = TargetFrame.Origin + TargetFrame.ZAxis * 100;
-                            Point3d eeZ = EndPoint + EndFrame.ZAxis * 100;
                             var rot = Rotate(i, TargetFrame.ZAxis, EndFrame.ZAxis);
+                            RhinoApp.WriteLine("WTF OriginalLinks count = {0}", OriginalLinks.Count);
+
                             rotateAxes(i, rot);
+                            RhinoApp.WriteLine("WTF 0");
+
                         }
+
                     }
                     break;
                 case 1:
                     if (Vector3d.VectorAngle(TargetFrame.XAxis, EndFrame.XAxis) > 0.01)
                     {
+                        RhinoApp.WriteLine("WTF 1");
+
                         for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----X
                         {
-                            Point3d targetX = TargetFrame.Origin + TargetFrame.XAxis * 100;
-                            Point3d eeX = EndPoint + EndFrame.XAxis * 100;
                             var rot = Rotate(i, TargetFrame.XAxis, EndFrame.XAxis);
                             rotateAxes(i, rot);
                         }
@@ -397,18 +401,15 @@ public partial class MyExternalScript : GH_ScriptInstance
                     {
                         for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----Y
                         {
-                            Point3d targetY = TargetFrame.Origin + TargetFrame.YAxis * 100;
-                            Point3d eeY = EndPoint + EndFrame.YAxis * 100;
                             var rot = Rotate(i, TargetFrame.YAxis, EndFrame.YAxis);
                             rotateAxes(i, rot);
-
                         }
                     }
                     break;
                 case 3:
-
                     if (DistError > 0.01)
                     {
+                        RhinoApp.WriteLine("WTF 3");
                         for (int i = 0; i <= Axes.Count - 1; i++)           //for each axis-----ORIGIN  
                         {
                             var rot = Rotate(i, TargetFrame.Origin, EndPoint);
@@ -418,73 +419,12 @@ public partial class MyExternalScript : GH_ScriptInstance
 
                     break;
                 case 4:
-
                     if (DistError > 0.01)
                     {
+                        RhinoApp.WriteLine("WTF 4");
                         for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----ORIGIN  
                         {
                             var rot = Rotate(i, TargetFrame.Origin, EndPoint);
-                            rotateAxes(i, rot);
-                        }
-                    }
-                    break;
-            }
-        }
-
-        private void stepCCD_Orient(int iterationCount, Plane target)
-        {
-            switch (iterationCount % 5)
-            {
-                case 0:
-                    if (Vector3d.VectorAngle(target.ZAxis, EndFrame.ZAxis) > 0.01)
-                    {
-                        for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----X
-                        {
-                            var rot = Rotate(i, target.ZAxis, EndFrame.ZAxis);
-                            rotateAxes(i, rot);
-                        }
-                    }
-                    break;
-                case 1:
-                    if (Vector3d.VectorAngle(target.XAxis, EndFrame.XAxis) > 0.01)
-                    {
-                        for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----X
-                        {
-                            var rot = Rotate(i, target.XAxis, EndFrame.XAxis);
-                            rotateAxes(i, rot);
-                        }
-                    }
-                    break;
-                case 6:
-                    if (Vector3d.VectorAngle(target.XAxis, EndFrame.XAxis) > 0.01)
-                    {
-                        for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----Y
-                        {
-                            var rot = Rotate(i, target.YAxis, EndFrame.YAxis);
-                            rotateAxes(i, rot);
-
-                        }
-                    }
-                    break;
-                case 3:
-
-                    if (DistError > 0.01)
-                    {
-                        for (int i = 0; i <= Axes.Count - 1; i++)           //for each axis-----ORIGIN  
-                        {
-                            var rot = Rotate(i, target.Origin, EndPoint);
-                            rotateAxes(i, rot);
-                        }
-                    }
-
-                    break;
-                case 4:
-
-                    if (DistError > 0.01)
-                    {
-                        for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----ORIGIN  
-                        {
-                            var rot = Rotate(i, target.Origin, EndPoint);
                             rotateAxes(i, rot);
                         }
                     }
@@ -502,9 +442,10 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (angle > Math.PI) angle = angle - (2 * Math.PI);
             if (JointRange.Branch(new GH_Path(i))[0] != 0 && (JointRange.Branch(new GH_Path(i))[0] > (JointAngles[i] + angle) || (JointAngles[i] + angle) > JointRange.Branch(new GH_Path(i))[1]))
                 angle = JointRange.Branch(new GH_Path(i))[1] - JointAngles[i];
-            var rot = Transform.Rotation(angle, Axes[i].Direction, Axes[i].From);
-            //RhinoApp.WriteLine("fixed angle[{1}] = {0}", angle, i);
             JointAngles[i] += angle;
+
+            var rot = Transform.Rotation(JointAngles[i], Axes[i].Direction, Axes[i].From);
+            //RhinoApp.WriteLine("fixed angle[{1}] = {0}", angle, i);
             return rot;
         }
 
@@ -527,18 +468,29 @@ public partial class MyExternalScript : GH_ScriptInstance
             Plane endFrameTemp = EndFrame;
             endFrameTemp.Transform(rot);
             EndFrame = endFrameTemp;
+            RhinoApp.WriteLine("WTF MATE");
 
             for (int i = j; i < Axes.Count; i++)        //move link and children
             {
+                RhinoApp.WriteLine("AXES count = {0}", Axes.Count);
+                RhinoApp.WriteLine("Planes count = {0}", OriginalAxisPlanes.Count);
+                RhinoApp.WriteLine("OriginalLinks count = {0}", OriginalLinks.Count);
+                RhinoApp.WriteLine("Links count = {0}", Links.Count);
+
                 Line axis = OriginalAxes[i];
+
                 Line link = OriginalLinks[i];
                 Plane plane = OriginalAxisPlanes[i];
                 axis.Transform(rot);
                 link.Transform(rot);
                 plane.Transform(rot);
+
                 Axes[i] = axis;
+                RhinoApp.WriteLine("WTF FU count = {0}", i);
+
                 Links[i] = link;
                 AxisPlanes[i] = plane;
+
             }
         }
 
