@@ -217,7 +217,9 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             Line endLink = new Line(OriginalLinks[OriginalLinks.Count - 1].To, new Vector3d(OriginalLinks[OriginalLinks.Count - 1].To - OriginalLinks[OriginalLinks.Count - 1].From), 30);
             OriginalLinks.Add(endLink);
-            EndFrame = new Plane(endLink.To, endLink.Direction);
+
+            OriginalEndFrame = new Plane(endLink.To, endLink.Direction);
+
             RhinoApp.WriteLine("OriginalLinks count = {0}", OriginalLinks.Count);
 
 
@@ -225,33 +227,20 @@ public partial class MyExternalScript : GH_ScriptInstance
 
         public void InitializeBot(List<Line> axes, DataTree<Brep> bodies, DataTree<double> jointRange)
         {
-            OriginalBodies = bodies;
-            OriginalAxes = axes;
             JointRange = jointRange;
             foreach (Line l in OriginalAxes)
             {
-                OriginalAxisPlanes.Add(new Plane(l.From, l.Direction));
                 AxisPlanes.Add(new Plane(l.From, l.Direction));
                 JointAngles.Add(0.0);
             }
-            for (int i = 0; i < OriginalAxes.Count - 1; i++)
-                OriginalLinks.Add(new Line(OriginalAxes[i].From, OriginalAxes[i + 1].From));
-
-            Line endLink = new Line(OriginalLinks[OriginalLinks.Count - 1].To, new Vector3d(OriginalLinks[OriginalLinks.Count - 1].To - OriginalLinks[OriginalLinks.Count - 1].From), 30);
-            OriginalLinks.Add(endLink);
-            EndFrame = new Plane(endLink.To, endLink.Direction);
             IsSet = true;
             RhinoApp.WriteLine("initializing");
         }
         public void Clear()
         {
             Axes.Clear();
-            jointRange.Clear();
-            OriginalAxisPlanes.Clear();
             AxisPlanes.Clear();
-            OriginalBodies.Clear();
             Bodies.Clear();
-            OriginalLinks.Clear();
             Links.Clear();
             JointAngles.Clear();
             Iterations = 0;
@@ -302,7 +291,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             bool successOut = false;
             TargetPlane = target;
             TargetFrame = target;
-            double oldDist = 1000000.0;
             distThreshhold = Math.Pow(distThreshhold, 2);
 
             if (Iterations == 0)
@@ -465,7 +453,7 @@ public partial class MyExternalScript : GH_ScriptInstance
 
         private void rotateAxes(int j, Transform rot)
         {
-            Plane endFrameTemp = EndFrame;
+            Plane endFrameTemp = OriginalEndFrame;
             endFrameTemp.Transform(rot);
             EndFrame = endFrameTemp;
             RhinoApp.WriteLine("WTF MATE");
