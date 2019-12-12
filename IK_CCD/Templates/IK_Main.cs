@@ -108,7 +108,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Print("ErrorSq = {0}", bot.DistError);
             Print("AngleError = {0}", bot.AngleError);
         }
-        bot.Iterations = 0;
+        //bot.Iterations = 0;
         Axes = bot.Links;
         EndPlane = bot.EndFrame;
         Bodies = bot.Bodies;
@@ -325,8 +325,11 @@ public partial class MyExternalScript : GH_ScriptInstance
             bool success = false;
             TargetFrame = target;
             distThreshhold = Math.Pow(distThreshhold, 2);
-            TargetFrame = new Plane(target.Origin, structure.Branch(0)[0].Direction, structure.Branch(0)[1].Direction);
-            for (int j = 0; j<5; j++) stepCCD_Orient(j);
+            if (Iterations == 0)
+            {
+                TargetFrame = new Plane(target.Origin, structure.Branch(0)[0].Direction, structure.Branch(0)[1].Direction);
+                for (int j = 0; j < 5; j++) stepCCD_Orient(j);
+            }
             TargetFrame = new Plane(structure.Branch(0)[0].ClosestPoint(EndFrame.Origin, true), structure.Branch(0)[0].Direction, structure.Branch(0)[1].Direction);
             for (int i = Iterations; i < maxIterations; i++)
             {
@@ -465,6 +468,7 @@ public partial class MyExternalScript : GH_ScriptInstance
 
                     break;
                 case 4:
+
                     if (DistError > 0.01)
                     {
                         for (int i = Axes.Count - 1; i >= 0; i--)           //for each axis-----ORIGIN  
