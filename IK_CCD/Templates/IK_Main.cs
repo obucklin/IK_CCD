@@ -57,7 +57,7 @@ public partial class MyExternalScript : GH_ScriptInstance
     #endregion
 
 
-    private void RunScript(bool reset, List<Line> axes, List<Line> links, Plane rootFrame, Plane endFrame, Plane target, bool orient, DataTree<Brep> bodies, DataTree<double> range, DataTree<Line> structure, int iterations, double error, double angleError, int step, ref object Axes, ref object EndPlane, ref object Bodies, ref object TargetPlane, ref object Solved)
+    private void RunScript(bool reset, List<Line> axes, Plane rootFrame, Plane endFrame, Plane target, bool orient, DataTree<Brep> bodies, DataTree<double> range, List<Polyline> structure, int iterations, double error, double angleError, int step, ref object Axes, ref object EndPlane, ref object Bodies, ref object TargetPlane, ref object GoalPlane, ref object Solved)
     {
         // <Custom code>
 
@@ -65,13 +65,13 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             bot.Clear();
             Print("reset");
-            bot.InitializeBot(axes, links, rootFrame, endFrame, bodies, range);
+            bot.InitializeBot(axes, rootFrame, endFrame, bodies, range);
         }
         else
         {
             if (!bot.IsSet)
             {
-                bot.InitializeBot(axes, links, rootFrame, endFrame, bodies, range);
+                bot.InitializeBot(axes, rootFrame, endFrame, bodies, range);
             }
 
             if (error == 0) error = 0.1;
@@ -79,7 +79,7 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             if (bot.Iterations < iterations && !bot.TargetSolved)
             {
-                if (structure.DataCount == 0)
+                if (structure.Count == 0)
                 {
                     if (orient)
                     {
@@ -99,7 +99,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                     if (orient)
                     {
                         bot.Solve_IK(target, structure, error, angleError, iterations);
-                        RhinoApp.WriteLine("Solving Line");
+                        RhinoApp.WriteLine("Solving on structure");
                     }
                 }
             }
@@ -114,11 +114,12 @@ public partial class MyExternalScript : GH_ScriptInstance
             Print("AngleError = {0}", bot.AngleError);
 
 
-            Axes = bot.OrientationPlanes;
+            Axes = bot.RobotSteps[step].StateOrientationPlanes;
             EndPlane = bot.EndFrame;
             Bodies = bot.Bodies;
-            TargetPlane = bot.TargetFrame;
-            Solved = bot.TargetSolved;
+            TargetPlane = bot.RobotSteps[step].StateTargetFrame;
+            GoalPlane = bot.GoalFrame;
+            Solved = bot.RobotSteps[step].StateSolved;
         }
         // </Custom code>
     }
@@ -130,41 +131,34 @@ public partial class MyExternalScript : GH_ScriptInstance
     public class Robot
     {
         private List<Line> originalAxes = new List<Line>();
-        private List<Line> axes = new List<Line>();
         private DataTree<double> jointRange = new DataTree<double>();
         private List<Plane> originalOrientationPlanes = new List<Plane>();
+        private List<Plane> reverseOriginalOrientationPlanes = new List<Plane>();
         private List<Plane> orientationPlanes = new List<Plane>();
         private DataTree<Brep> originalBodies = new DataTree<Brep>();
         private DataTree<Brep> bodies = new DataTree<Brep>();
-        private List<Line> originalLinks = new List<Line>();
-        private List<Line> links = new List<Line>();
         private List<double> jointAngles = new List<double>();
         private List<Line> errorLines = new List<Line> { new Line(), new Line(), new Line() };
         private DataTree<RobotState> robotStates = new DataTree<RobotState>();
-        //private RobotState currentState = new RobotState();
-        //private double distError;        //actually square of dist to shorten calculation time
-        //private double angleError;
-        //private Point3d endPoint;
-        private Point3d targetPoint;
+        private List<RobotState> robotSteps = new List<RobotState>();
         private Plane targetFrame;
         private Plane goalFrame;
         private int iterations;
+        private int totalIterations;
+        private int steps;
         private bool targetSolved = false;
+        private bool flipped = false;
         private bool goalSolved = false;
         private bool isSet = false;
 
-        public List<Line> OriginalAxes { get { return axes; } set { axes = value; } }
-        public List<Line> Axes { get { return axes; } set { axes = value; } }
-        public DataTree<double> JointRange
-        { get { return jointRange; } set { jointRange = value; } }
-        public List<Plane> OriginalOrientationPlanes
-        { get { return originalOrientationPlanes; } set { originalOrientationPlanes = value; } }
-        public List<Plane> OrientationPlanes
-        { get { return orientationPlanes; } set { orientationPlanes = value; } }
+        public List<Line> OriginalAxes { get { return originalAxes; } set { originalAxes = value; } }
+        public DataTree<double> JointRange { get { return jointRange; } set { jointRange = value; } }
+        public DataTree<double> ReverseJointRange { get { return jointRange; } set { jointRange = value; } }
+        public List<Plane> OriginalOrientationPlanes { get { return originalOrientationPlanes; } set { originalOrientationPlanes = value; } }
+        public List<Plane> ReverseOriginalOrientationPlanes { get { return reverseOriginalOrientationPlanes; } set { reverseOriginalOrientationPlanes = value; } }
+        public List<Plane> OrientationPlanes { get { return orientationPlanes; } set { orientationPlanes = value; } }
         public DataTree<Brep> OriginalBodies { get { return originalBodies; } set { originalBodies = value; } }
         public DataTree<Brep> Bodies { get { return bodies; } set { bodies = value; } }
-        public List<Line> OriginalLinks { get { return links; } set { links = value; } }
-        public List<Line> Links { get { return links; } set { links = value; } }
         public List<double> JointAngles { get { return jointAngles; } set { jointAngles = value; } }
         public List<Line> ErrorLines { get { return errorLines; } set { errorLines = value; } }
         public double DistError { get { return Math.Abs(EndPoint.X - TargetFrame.Origin.X) + Math.Abs(EndPoint.Y - TargetFrame.Origin.Y) + Math.Abs(EndPoint.Z - TargetFrame.Origin.Z); } }
@@ -174,60 +168,56 @@ public partial class MyExternalScript : GH_ScriptInstance
         public Plane OriginalEndFrame { get { return originalOrientationPlanes[originalOrientationPlanes.Count - 1]; } set { originalOrientationPlanes[originalOrientationPlanes.Count - 1] = value; } }
         public Plane EndFrame { get { return orientationPlanes[orientationPlanes.Count - 1]; } set { orientationPlanes[orientationPlanes.Count - 1] = value; } }
         public Point3d EndPoint { get { return EndFrame.Origin; } }
-
-        public Point3d TargetPoint { get { return targetPoint; } set { targetPoint = value; } }
         public Plane TargetFrame { get { return targetFrame; } set { targetFrame = value; } }
         public Plane GoalFrame { get { return goalFrame; } set { goalFrame = value; } }
         public int Iterations { get { return iterations; } set { iterations = value; } }
+        public int TotalIterations { get { return totalIterations; } set { totalIterations = value; } }
+        public int Steps { get { return steps; } set { steps = value; } }
         public bool TargetSolved { get { return targetSolved; } set { targetSolved = value; } }
         public bool GoalSolved { get { return goalSolved; } set { goalSolved = value; } }
+        public bool Flipped { get { return flipped; } set { flipped = value; } }
         public bool IsSet { get { return isSet; } set { isSet = value; } }
         public DataTree<RobotState> RobotStates { get { return robotStates; } set { robotStates = value; } }
-        public List<RobotState> RobotSteps = new List<RobotState>();
+        public List<RobotState> RobotSteps { get { return robotSteps; } set { robotSteps = value; } }
         public List<object> testOut = new List<object>();
         public Robot() { }
 
 
-        public class RobotState : Robot
+        public class RobotState
         {
-            private Plane stateRootFrame;
             private Plane stateTargetFrame;
             private int stateIterations;
             private bool stateSolved;
+            private bool stateFlipped;
             private List<double> stateJointAngles = new List<double>();
             private List<Plane> stateOrientationPlanes = new List<Plane>();
 
-            public Plane StateRootFrame { get { return stateRootFrame; } set { stateRootFrame = value; } }
+            public Plane StateRootFrame { get { return stateOrientationPlanes[0]; } set { stateOrientationPlanes[0] = value; } }
             public Plane StateTargetFrame { get { return stateTargetFrame; } set { stateTargetFrame = value; } }
             public bool StateSolved { get { return stateSolved; } set { stateSolved = value; } }
+            public bool StateFlipped { get { return stateFlipped; } set { stateFlipped = value; } }
             public int StateIterations { get { return stateIterations; } set { stateIterations = value; } }
             public List<double> StateJointAngles { get { return stateJointAngles; } set { stateJointAngles = value; } }
             public List<Plane> StateOrientationPlanes { get { return stateOrientationPlanes; } set { stateOrientationPlanes = value; } }
 
             public RobotState() { }
-            public RobotState(Plane root, List<double> angles, int iterations, Plane target, bool solved)
+            public RobotState(Plane root, List<double> angles, List<Plane> planes, int iterations, Plane target, bool flipped, bool solved)
             {
 
-                StateRootFrame = root;
                 StateTargetFrame = target;
                 StateIterations = iterations;
                 StateSolved = solved;
+                StateFlipped = flipped;
+                foreach (Plane p in planes) StateOrientationPlanes.Add(p);
                 foreach (double d in angles)
                 {
                     StateJointAngles.Add(d);
                 }
             }
-
-            public void SaveCurrentState()
-            {
-                this.RootFrame = RootFrame;
-                foreach (double d in JointAngles) StateJointAngles.Add(d);
-            }
         }
-        public void InitializeBot(List<Line> axes, List<Line> links, Plane rootPlane, Plane endPlane, DataTree<Brep> bodies, DataTree<double> jointRange)
+        public void InitializeBot(List<Line> axes, Plane rootPlane, Plane endPlane, DataTree<Brep> bodies, DataTree<double> jointRange)
         {
             OriginalAxes = axes;
-            OriginalLinks = links;
             OriginalBodies = bodies;
             JointRange = jointRange;
 
@@ -243,21 +233,29 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
             OriginalOrientationPlanes.Add(endPlane);
 
-            foreach (Plane p in OriginalOrientationPlanes) OrientationPlanes.Add(p);
+            foreach (Plane p in OriginalOrientationPlanes)
+            {
+                OrientationPlanes.Add(p);
+                ReverseOriginalOrientationPlanes.Add(p);
+            }
+            ReverseOriginalOrientationPlanes.Reverse();
             IsSet = true;
             RhinoApp.WriteLine("initializing robot");
         }
         public void Clear()
         {
-            Axes = OriginalAxes;
             Bodies = OriginalBodies;
-            Links = OriginalLinks;
             OrientationPlanes.Clear();
             OriginalOrientationPlanes.Clear();
             JointAngles.Clear();
             ErrorLines.Clear();
+            RobotSteps.Clear();
             Iterations = 0;
+            TotalIterations = 0;
+            Steps = 0;
+            Flipped = false;
             TargetSolved = false;
+            GoalSolved = false;
             IsSet = false;
 
         }
@@ -272,8 +270,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 if (DistError < threshhold) targetSolved = true;
                 if (Iterations == Math.Pow(2, k))
                 {
-                    RhinoApp.WriteLine("RobotSteps count @ {1} = {0}", RobotSteps.Count, Iterations);
-                    RobotSteps.Add(new RobotState(RootFrame, JointAngles, Iterations, TargetFrame, TargetSolved));
+                    RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
                     k++;
                 }
             }
@@ -282,57 +279,77 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         public void Solve_IK(Plane target, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)            //  with orientation
         {
+
             TargetFrame = target;
             int k = 0;
             while (Iterations < maxIterations && !TargetSolved)
             {
+
                 stepCCD_Orient(TargetFrame);
                 if (Iterations == Math.Pow(2, k))
                 {
-                    RhinoApp.WriteLine("RobotSteps count @ {1} = {0}", RobotSteps.Count, Iterations);
-                    RobotSteps.Add(new RobotState(RootFrame, JointAngles, Iterations, TargetFrame, TargetSolved));
+                    RhinoApp.WriteLine("SOLVING: Iterations = {0}", Iterations);
+
+                    RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
                     k++;
                 }
                 if (DistError < distThreshhold && AngleError < angleThreshhold) TargetSolved = true;
-
+                if (TargetSolved) RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
             }
-            RhinoApp.WriteLine("Fart Solved = {0}", TargetSolved);
         }
-        public void Solve_IK(Plane target, DataTree<Line> structure, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)            // on Line Only
+        public void Solve_IK(Plane target, List<Polyline> structure, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)            // on Line Only
         {
-            if (!TargetSolved)
+            int structureMember = 0;
+            while (!GoalSolved && Steps < 10)
             {
-                RhinoApp.WriteLine("with structure");
+                if (Flipped) RhinoApp.WriteLine("flipped");
+                RhinoApp.WriteLine("structureMember = {0} ... steps = {1}", structureMember, steps);
                 GoalFrame = target;
-                targetFrame = new Plane(structure.Branch(0)[0].ClosestPoint(EndFrame.Origin, true), structure.Branch(0)[0].Direction, structure.Branch(0)[1].Direction);
-
-                RobotSteps.Add(new RobotState(RootFrame, JointAngles, Iterations, TargetFrame, TargetSolved));
-
-                int k = 0;
-
-                while (Iterations <= maxIterations && !TargetSolved)
+                Solve_IK(GoalFrame, distThreshhold, angleThreshhold, maxIterations);
+                Iterations = 0;
+                structure = structure.OrderBy(d => new Line(d[1], d[2]).DistanceTo(EndFrame.Origin, true)).ToList();
+                if (TargetSolved)
                 {
+                    GoalSolved = true;
+                    RhinoApp.WriteLine("GOAL REACHED !!!!");
+                }
+                else
+                {
+                    TargetFrame = new Plane(new Line(structure[structureMember][1], structure[structureMember][2]).ClosestPoint(EndFrame.Origin, true), new Vector3d(structure[structureMember][0] - structure[structureMember][1]), new Vector3d(structure[structureMember][2] - structure[structureMember][1]));
+                    RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
 
-                    if (Iterations < 2) stepCCD(GoalFrame.Origin, false);
-                    else
+                    int k = 0;
+
+                    while (Iterations <= maxIterations && !TargetSolved)
                     {
-
-                        if (Iterations % 4 == 2) targetFrame.Origin = structure.Branch(0)[0].ClosestPoint(EndFrame.Origin, true);
+                        if (Iterations % 4 == 2) targetFrame.Origin = new Line(structure[structureMember][1], structure[structureMember][2]).ClosestPoint(EndFrame.Origin, true);
                         stepCCD_Orient(TargetFrame);
 
+                        if (Iterations == Math.Pow(2, k))
+                        {
+                            RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
+                            k++;
+                        }
+                        if (DistError < distThreshhold && AngleError < angleThreshhold) TargetSolved = true;
+
                     }
-                    if (Iterations == Math.Pow(2, k))
+                    if (TargetSolved)
                     {
-                        RhinoApp.WriteLine("RobotSteps count @ {1} = {0}", RobotSteps.Count, Iterations);
-                        RobotSteps.Add(new RobotState(RootFrame, JointAngles, Iterations, TargetFrame, TargetSolved));
-                        k++;
+                        RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
+                        TargetSolved = false;
+
+                        FlipRobot();
+
                     }
-                    if (DistError < distThreshhold && AngleError < angleThreshhold) TargetSolved = true;
+                    else
+                    {
+                        if (structureMember < structure.Count - 1) structureMember++;
+                        else structureMember = 0;
+                    }
+                    Steps++;
 
+                    Iterations = 0;
                 }
-                if (TargetSolved) RobotSteps.Add(new RobotState(RootFrame, JointAngles, Iterations, TargetFrame, TargetSolved));
-                RhinoApp.WriteLine("correct angle[0] = {0}", JointAngles[0]);
-
             }
         }
 
@@ -355,6 +372,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 }
             }
             Iterations++;
+            TotalIterations++;
         }
 
         private void stepCCD_Orient(Plane target)
@@ -404,6 +422,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                     break;
             }
             Iterations++;
+            TotalIterations++;
         }
 
         private double getAngle(int joint, Point3d target, Point3d end)
@@ -446,23 +465,65 @@ public partial class MyExternalScript : GH_ScriptInstance
             JointAngles[joint] += angle;
         }
 
+        public void FlipRobot()
+        {
+            Flipped = !Flipped;
+
+            RootFrame = EndFrame;
+            if (Flipped)
+            {
+                var rebase = Transform.PlaneToPlane(OriginalRootFrame, RootFrame);
+
+                for (int i = 0; i < OriginalOrientationPlanes.Count; i++)
+                {
+                    Plane planeTemp = OriginalOrientationPlanes[OriginalOrientationPlanes.Count - 1 - i];
+                    planeTemp.Transform(rebase);
+                    OrientationPlanes[i] = planeTemp;
+                }
+                for (int i = 0; i < JointAngles.Count; i++)
+                {
+                    JointAngles[i] = -JointAngles[i];
+                    RotateJoint(i, JointAngles[i]);
+                }
+            }
+            else
+            {
+                var rebase = Transform.PlaneToPlane(OriginalRootFrame, RootFrame);
+
+                for (int i = 0; i < OriginalOrientationPlanes.Count; i++)
+                {
+                    Plane planeTemp = OriginalOrientationPlanes[i];
+                    planeTemp.Transform(rebase);
+                    OrientationPlanes[i] = planeTemp;
+                }
+                for (int i = 0; i < JointAngles.Count; i++)
+                {
+                    JointAngles[i] = -JointAngles[i];
+                    RotateJoint(i, JointAngles[i]);
+                }
+            }
+        }
+
         public void goToState(RobotState state)
         {
-            RhinoApp.WriteLine("angle[0] = {0}", JointAngles[0]);
-            RootFrame = state.StateRootFrame;
-            TargetSolved = state.StateSolved;
-            var rebase = Transform.PlaneToPlane(OriginalRootFrame, state.StateRootFrame);
+            OrientationPlanes = state.StateOrientationPlanes;
+            Flipped = state.StateFlipped;
+            //if (state.StateFlipped) OriginalOrientationPlanes.Reverse();
+            //RootFrame = state.StateRootFrame;
+            //TargetFrame = state.StateTargetFrame;
+            //var rebase = Transform.PlaneToPlane(OriginalRootFrame, state.StateRootFrame);
 
-            for (int i = 0; i < OrientationPlanes.Count; i++)
-            {
-                Plane planeTemp = OriginalOrientationPlanes[i];
-                planeTemp.Transform(rebase);
-                OrientationPlanes[i] = planeTemp;
-            }
-            for (int i = 0; i < JointAngles.Count; i++)
-            {
-                RotateJoint(i, state.StateJointAngles[i]);
-            }
+            //RhinoApp.WriteLine("OP count = {0}", state.StateOrientationPlanes.Count);
+            //for (int i = 0; i < OrientationPlanes.Count; i++)
+            //{
+            //    Plane planeTemp = OriginalOrientationPlanes[i];
+            //    planeTemp.Transform(rebase);
+            //    OrientationPlanes[i] = planeTemp;
+            //}
+            //for (int i = 0; i < JointAngles.Count; i++)
+            //{
+            //    RotateJoint(i, state.StateJointAngles[i]);
+            //}
         }
 
         public void ApplyBodies()
@@ -471,13 +532,28 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             for (int i = 0; i < OrientationPlanes.Count - 1; i++)
             {
-                var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[i], OrientationPlanes[i]);
-                foreach (Brep b in OriginalBodies.Branch(new GH_Path(i)))
+                if (Flipped)
                 {
-                    Brep brepTemp = new Brep();
-                    brepTemp = b.DuplicateBrep();
-                    brepTemp.Transform(reorient);
-                    Bodies.Add(brepTemp, new GH_Path(i + 1));
+                    RhinoApp.WriteLine("flipped");
+                    var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[OrientationPlanes.Count - 1 - i], OrientationPlanes[i]);
+                    foreach (Brep b in OriginalBodies.Branch(new GH_Path(OrientationPlanes.Count - 2 - i)))
+                    {
+                        Brep brepTemp = new Brep();
+                        brepTemp = b.DuplicateBrep();
+                        brepTemp.Transform(reorient);
+                        Bodies.Add(brepTemp, new GH_Path(OrientationPlanes.Count - 2 - i));
+                    }
+                }
+                else
+                {
+                    var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[i], OrientationPlanes[i]);
+                    foreach (Brep b in OriginalBodies.Branch(new GH_Path(i)))
+                    {
+                        Brep brepTemp = new Brep();
+                        brepTemp = b.DuplicateBrep();
+                        brepTemp.Transform(reorient);
+                        Bodies.Add(brepTemp, new GH_Path(i));
+                    }
                 }
             }
         }
