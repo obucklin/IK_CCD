@@ -106,7 +106,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (step >= bot.RobotSteps.Count) step = bot.RobotSteps.Count - 1;
             if (step < 0) step = 0;
             bot.goToState(bot.RobotSteps[step]);
-            //Print("botsteps[step].angles[0] = {0}", bot.RobotSteps[step].JointAngles[0]);
             bot.ApplyBodies();
             if (bot.TargetSolved) Print("solve OK");
             Print("iterations = {0}", bot.Iterations);
@@ -135,6 +134,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         private List<Plane> originalOrientationPlanes = new List<Plane>();
         private List<Plane> reverseOriginalOrientationPlanes = new List<Plane>();
         private List<Plane> orientationPlanes = new List<Plane>();
+        private List<Plane> reverseOrientationPlanes = new List<Plane>();
         private DataTree<Brep> originalBodies = new DataTree<Brep>();
         private DataTree<Brep> bodies = new DataTree<Brep>();
         private List<double> jointAngles = new List<double>();
@@ -152,10 +152,8 @@ public partial class MyExternalScript : GH_ScriptInstance
         private bool isSet = false;
 
         public List<Line> OriginalAxes { get { return originalAxes; } set { originalAxes = value; } }
-        public DataTree<double> JointRange { get { return jointRange; } set { jointRange = value; } }
-        public DataTree<double> ReverseJointRange { get { return jointRange; } set { jointRange = value; } }
+        public DataTree<double> JointRanges { get { return jointRange; } set { jointRange = value; } }
         public List<Plane> OriginalOrientationPlanes { get { return originalOrientationPlanes; } set { originalOrientationPlanes = value; } }
-        public List<Plane> ReverseOriginalOrientationPlanes { get { return reverseOriginalOrientationPlanes; } set { reverseOriginalOrientationPlanes = value; } }
         public List<Plane> OrientationPlanes { get { return orientationPlanes; } set { orientationPlanes = value; } }
         public DataTree<Brep> OriginalBodies { get { return originalBodies; } set { originalBodies = value; } }
         public DataTree<Brep> Bodies { get { return bodies; } set { bodies = value; } }
@@ -181,8 +179,6 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<RobotState> RobotSteps { get { return robotSteps; } set { robotSteps = value; } }
         public List<object> testOut = new List<object>();
         public Robot() { }
-
-
         public class RobotState
         {
             private Plane stateTargetFrame;
@@ -219,7 +215,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             OriginalAxes = axes;
             OriginalBodies = bodies;
-            JointRange = jointRange;
+            JointRanges = jointRange;
 
             RobotSteps.Clear();
             testOut.Clear();
@@ -236,9 +232,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             foreach (Plane p in OriginalOrientationPlanes)
             {
                 OrientationPlanes.Add(p);
-                ReverseOriginalOrientationPlanes.Add(p);
             }
-            ReverseOriginalOrientationPlanes.Reverse();
             IsSet = true;
             RhinoApp.WriteLine("initializing robot");
         }
@@ -270,6 +264,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 if (DistError < threshhold) targetSolved = true;
                 if (Iterations == Math.Pow(2, k))
                 {
+                    //if (Flipped) RobotSteps.Add(new RobotState(RootFrame, JointAngles, ReverseOrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
                     RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
                     k++;
                 }
@@ -288,8 +283,6 @@ public partial class MyExternalScript : GH_ScriptInstance
                 stepCCD_Orient(TargetFrame);
                 if (Iterations == Math.Pow(2, k))
                 {
-                    RhinoApp.WriteLine("SOLVING: Iterations = {0}", Iterations);
-
                     RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
                     k++;
                 }
@@ -302,7 +295,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             int structureMember = 0;
             while (!GoalSolved && Steps < 10)
             {
-                if (Flipped) RhinoApp.WriteLine("flipped");
                 RhinoApp.WriteLine("structureMember = {0} ... steps = {1}", structureMember, steps);
                 GoalFrame = target;
                 Solve_IK(GoalFrame, distThreshhold, angleThreshhold, maxIterations);
@@ -339,6 +331,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         TargetSolved = false;
 
                         FlipRobot();
+                        RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
 
                     }
                     else
@@ -352,7 +345,6 @@ public partial class MyExternalScript : GH_ScriptInstance
                 }
             }
         }
-
         private void stepCCD(Point3d target, bool startAtEnd)     //Location Only
         {
             if (startAtEnd)
@@ -374,7 +366,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations++;
             TotalIterations++;
         }
-
         private void stepCCD_Orient(Plane target)
         {
             switch (Iterations % 4)
@@ -424,7 +415,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations++;
             TotalIterations++;
         }
-
         private double getAngle(int joint, Point3d target, Point3d end)
         {
             Vector3d jointToEnd = new Vector3d(end - OrientationPlanes[joint + 1].Origin);
@@ -432,119 +422,95 @@ public partial class MyExternalScript : GH_ScriptInstance
             double angle = Vector3d.VectorAngle(jointToEnd, jointToGoal, OrientationPlanes[joint + 1]);
             if (angle < Math.PI * (-2) || angle > Math.PI * (2)) angle = 0;
             if (angle > Math.PI) angle = angle - (2 * Math.PI);
-            if (JointRange.Branch(new GH_Path(joint))[0] != 0 && (JointRange.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRange.Branch(new GH_Path(joint))[1]))
-                angle = JointRange.Branch(new GH_Path(joint))[1] - JointAngles[joint];
+            if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
+                angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
             return angle;
         }
-
         private double getAngle(int joint, Vector3d target, Vector3d end)
         {
             double angle = Vector3d.VectorAngle(end, target, OrientationPlanes[joint + 1]);
 
             if (angle < Math.PI * (-2) || angle > Math.PI * (2)) angle = 0;
             if (angle > Math.PI) angle = angle - (2 * Math.PI);
-            if (JointRange.Branch(new GH_Path(joint))[0] != 0 && (JointRange.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRange.Branch(new GH_Path(joint))[1]))
-                angle = JointRange.Branch(new GH_Path(joint))[1] - JointAngles[joint];
+            if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
+                angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
 
             angle = angle * (1 - Math.Abs(end * OrientationPlanes[joint + 1].Normal));
             angle = angle * (1 - Math.Abs(target * OrientationPlanes[joint + 1].Normal));
 
             return angle;
         }
-
         public void RotateJoint(int joint, double angle)
         {
             var rotate = Transform.Rotation(angle, OrientationPlanes[joint + 1].Normal, OrientationPlanes[joint + 1].Origin);
-
-            for (int i = joint; i < OrientationPlanes.Count - 1; i++)        //move link and children
-            {
-                Plane plane = OrientationPlanes[i + 1];
-                plane.Transform(rotate);
-                OrientationPlanes[i + 1] = plane;
-            }
-            JointAngles[joint] += angle;
-        }
-
-        public void FlipRobot()
-        {
-            Flipped = !Flipped;
-
-            RootFrame = EndFrame;
             if (Flipped)
             {
-                var rebase = Transform.PlaneToPlane(OriginalRootFrame, RootFrame);
-
-                for (int i = 0; i < OriginalOrientationPlanes.Count; i++)
+                for (int i = joint; i < OrientationPlanes.Count - 2; i++)        //move link and children
                 {
-                    Plane planeTemp = OriginalOrientationPlanes[OriginalOrientationPlanes.Count - 1 - i];
-                    planeTemp.Transform(rebase);
-                    OrientationPlanes[i] = planeTemp;
-                }
-                for (int i = 0; i < JointAngles.Count; i++)
-                {
-                    JointAngles[i] = -JointAngles[i];
-                    RotateJoint(i, JointAngles[i]);
+                    Plane plane = OrientationPlanes[i + 2];
+                    plane.Transform(rotate);
+                    OrientationPlanes[i + 2] = plane;
                 }
             }
             else
             {
-                var rebase = Transform.PlaneToPlane(OriginalRootFrame, RootFrame);
-
-                for (int i = 0; i < OriginalOrientationPlanes.Count; i++)
+                for (int i = joint; i < OrientationPlanes.Count - 1; i++)        //move link and children
                 {
-                    Plane planeTemp = OriginalOrientationPlanes[i];
-                    planeTemp.Transform(rebase);
-                    OrientationPlanes[i] = planeTemp;
-                }
-                for (int i = 0; i < JointAngles.Count; i++)
-                {
-                    JointAngles[i] = -JointAngles[i];
-                    RotateJoint(i, JointAngles[i]);
+                    Plane plane = OrientationPlanes[i + 1];
+                    plane.Transform(rotate);
+                    OrientationPlanes[i + 1] = plane;
                 }
             }
+            JointAngles[joint] += angle;
         }
+        public void FlipRobot()         // ONLY STUFF FOR IK
+        {
+            RhinoApp.WriteLine("Flipping");
 
+            Flipped = !Flipped;
+            DataTree<double> rangesTemp = new DataTree<double>();
+
+            for (int i = 0; i < JointAngles.Count; i++)
+            {
+                foreach (double d in JointRanges.Branch(JointRanges.Branches.Count - 1 - i)) rangesTemp.Add(d, new GH_Path(i));
+
+                JointAngles[i] = -JointAngles[i];
+                //var rotate = Transform.Rotation(JointAngles[i], OrientationPlanes[i + 1].Normal, OrientationPlanes[i + 1].Origin);
+                //Plane planeTemp = OrientationPlanes[i + 1];
+                //planeTemp.Transform(rotate);
+                //OrientationPlanes[i + 1] = planeTemp;
+            }
+            OrientationPlanes.Reverse();
+            JointAngles.Reverse();
+            JointRanges = rangesTemp;
+        }
         public void goToState(RobotState state)
         {
             OrientationPlanes = state.StateOrientationPlanes;
             Flipped = state.StateFlipped;
-            //if (state.StateFlipped) OriginalOrientationPlanes.Reverse();
-            //RootFrame = state.StateRootFrame;
-            //TargetFrame = state.StateTargetFrame;
-            //var rebase = Transform.PlaneToPlane(OriginalRootFrame, state.StateRootFrame);
-
-            //RhinoApp.WriteLine("OP count = {0}", state.StateOrientationPlanes.Count);
-            //for (int i = 0; i < OrientationPlanes.Count; i++)
-            //{
-            //    Plane planeTemp = OriginalOrientationPlanes[i];
-            //    planeTemp.Transform(rebase);
-            //    OrientationPlanes[i] = planeTemp;
-            //}
-            //for (int i = 0; i < JointAngles.Count; i++)
-            //{
-            //    RotateJoint(i, state.StateJointAngles[i]);
-            //}
+            TargetFrame = state.StateTargetFrame;
         }
-
         public void ApplyBodies()
         {
             Bodies.Clear();
 
-            for (int i = 0; i < OrientationPlanes.Count - 1; i++)
+            if (Flipped)
             {
-                if (Flipped)
+                for (int i = 0; i < OrientationPlanes.Count - 1; i++)
                 {
-                    RhinoApp.WriteLine("flipped");
-                    var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[OrientationPlanes.Count - 1 - i], OrientationPlanes[i]);
-                    foreach (Brep b in OriginalBodies.Branch(new GH_Path(OrientationPlanes.Count - 2 - i)))
+                    var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[i], OrientationPlanes[OrientationPlanes.Count - 1 - i]);
+                    foreach (Brep b in OriginalBodies.Branch(new GH_Path(i)))
                     {
                         Brep brepTemp = new Brep();
                         brepTemp = b.DuplicateBrep();
                         brepTemp.Transform(reorient);
-                        Bodies.Add(brepTemp, new GH_Path(OrientationPlanes.Count - 2 - i));
+                        Bodies.Add(brepTemp, new GH_Path(i));
                     }
                 }
-                else
+            }
+            else
+            {
+                for (int i = 0; i < OrientationPlanes.Count - 1; i++)
                 {
                     var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[i], OrientationPlanes[i]);
                     foreach (Brep b in OriginalBodies.Branch(new GH_Path(i)))
