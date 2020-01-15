@@ -108,9 +108,11 @@ public partial class MyExternalScript : GH_ScriptInstance
             bot.goToState(bot.RobotSteps[step]);
             bot.ApplyBodies();
             if (bot.TargetSolved) Print("solve OK");
-            Print("iterations = {0}", bot.Iterations);
+            Print("totalIterations = {0}", bot.TotalIterations);
             Print("ErrorSq = {0}", bot.DistError);
             Print("AngleError = {0}", bot.AngleError);
+            Print("steps = {0}", bot.Steps);
+            Print("stepCount = {0}", bot.RobotSteps.Count);
 
 
             Axes = bot.RobotSteps[step].StateOrientationPlanes;
@@ -307,6 +309,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                     }
                 }
             }
+            if (success) RhinoApp.WriteLine("Point Iterations = {0}", Iterations);
             Iterations = 0;
             if (success) RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, true));
             return success;
@@ -315,9 +318,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             DistThreshhold = distThreshhold;
             AngleThreshhold = angleThreshhold;
-
             bool success = false;
-            Iterations = 0;
             TargetFrame = target;
             int k = 0;
             while (Iterations < maxIterations && !success)
@@ -332,9 +333,14 @@ public partial class MyExternalScript : GH_ScriptInstance
                         k++;
                     }
                 }
+                if (Iterations == 100)
+                {
+                    if (DistError > 5 || AngleError > 0.1) break;
+                }
                 if (DistError < distThreshhold && AngleError < angleThreshhold) success = true;
                 if (success) RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, true));
             }
+            //if (success) RhinoApp.WriteLine("Plane Iterations = {0}", Iterations);
             Iterations = 0;
             return success;
         }
@@ -344,7 +350,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             DistThreshhold = distThreshhold;
             AngleThreshhold = angleThreshhold;
             bool success = false;
-            Iterations = 0;
             TargetFrame = target;
             int k = 0;
             while (Iterations < maxIterations && !success)
@@ -359,8 +364,13 @@ public partial class MyExternalScript : GH_ScriptInstance
                         k++;
                     }
                 }
+                if (Iterations == 100)
+                {
+                    if (DistError > 5 || AngleError > 0.1) break;
+                }
                 if (DistError < distThreshhold && AngleError < angleThreshhold) success = true;
             }
+            //if (success) RhinoApp.WriteLine("Strut Iterations = {0} on try {1}", Iterations, Tries +1);
             Iterations = 0;
             if (success) RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, true));
             return success;
@@ -373,12 +383,10 @@ public partial class MyExternalScript : GH_ScriptInstance
             RhinoApp.WriteLine("Solving Path");
 
             bool success = false;
-            int structureMember = 0;
             GoalFrame = target;
 
-            while (!GoalSolved && Steps < 20 && Tries < 20)
+            while (!GoalSolved && Steps < 40 && Tries < 20)
             {
-                RhinoApp.WriteLine("structureMember = {0} ... steps = {1} ... tries = {2}", structureMember, Steps, Tries);
                 bool trySolveGoal = true;
                 if (trySolveGoal) TrySolveGoal(maxIterations);
 
@@ -387,37 +395,40 @@ public partial class MyExternalScript : GH_ScriptInstance
                     bool breakFlag = false;
                     for (int member = 0; member < structure.Count; member++)
                     {
-                        for (int i = 0; i < 2; i++)
-                        {
-                            bool altRot = false;
-                            if (i == 1) altRot = true;
-                            trySolveGoal = false;
-                            Line strut;
-                            TargetFrame = GetTarget(ref structure, member, altRot, out strut);
+                        //RhinoApp.WriteLine("member = {0} ... steps = {1} ... tries = {2}", member, Steps, Tries);
 
-                            if (record) RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
-                            if (TestDistance(strut))   // if basic solver gets close enough
+                        trySolveGoal = false;
+                        Line strut;
+                        TargetFrame = GetTarget(ref structure, member, 0, out strut);
+
+                        if (record) RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
+                        if (TestDistance(strut))   // if basic solver gets close enough
+                        {
+                            for (int i = 0; i < 4; i++)
                             {
+                                TargetFrame = GetTarget(ref structure, member, i, out strut);
                                 TargetSolved = Solve_IK(TargetFrame, strut, distThreshhold, angleThreshhold, maxIterations);
                                 if (TargetSolved)
                                 {
                                     trySolveGoal = true;
-                                    if (record) RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
                                     TargetSolved = false;
                                     FlipRobot();
                                     Steps++;
                                     Tries = 0;
-                                    structureMember = 0;
                                     breakFlag = true;
                                     break;
                                 }
-                                else TestDistance(target, 1, 10);
+                                else
+                                {
+                                    RobotSteps.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, TargetSolved));
+                                    TestDistance(target, 1, 10);
+                                }
                             }
-                            else
-                            {
-                                Tries++;
-                                TestDistance(target, 1, 10);
-                            }
+                        }
+                        else
+                        {
+                            Tries++;
+                            TestDistance(target, 1, 10);
                         }
                         if (breakFlag) break;
                     }
@@ -558,24 +569,23 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
             JointAngles[joint] += angle;
         }
-        public Plane GetTarget(ref List<Polyline> structure, int structureMember, bool alignToEE, out Line strut)
+        public Plane GetTarget(ref List<Polyline> structure, int structureMember, int rot, out Line strut)
         {
             structure = structure.OrderBy(d => new Line(d[1], d[2]).DistanceTo(EndFrame.Origin, true)).ToList();
             strut = new Line(structure[structureMember][1], structure[structureMember][2]);
             Line structureToEnd = new Line(EndFrame.Origin, strut.ClosestPoint(EndFrame.Origin, true));
             Vector3d strutX = new Vector3d(structure[structureMember][0] - strut.ClosestPoint(structure[structureMember][0], false));
-            if(alignToEE) structureToEnd = new Line(EndFrame.Origin, EndFrame.Normal, 100);
             double squareAngle = Vector3d.VectorAngle(structureToEnd.Direction, strutX, strut.Direction);
             squareAngle = squareAngle * 2 / Math.PI;
             squareAngle = Math.Round(squareAngle) - 1;
-
+            squareAngle += rot * Math.PI;
             var strutRot = Transform.Rotation(-squareAngle * Math.PI / 2, strut.Direction, strut.From);
             strutX.Transform(strutRot);
             return new Plane(strut.ClosestPoint(EndFrame.Origin, true), strutX, strut.Direction);
         }
         public void FlipRobot()         // ONLY STUFF FOR IK
         {
-            RhinoApp.WriteLine("Flipping");
+            //RhinoApp.WriteLine("Flipping");
 
             Flipped = !Flipped;
             DataTree<double> rangesTemp = new DataTree<double>();
