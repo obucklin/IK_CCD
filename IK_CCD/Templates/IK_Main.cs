@@ -12,7 +12,7 @@ using Grasshopper.Kernel.Types;
 
 // <Custom "using" statements>
 using System.Linq;
-
+using System.Diagnostics;
 
 // </Custom "using" statements>
 
@@ -66,7 +66,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             bot.Restart();
             Print("targetMoved");
             str.Replan();
-
         }
         if (reset)
         {
@@ -117,21 +116,34 @@ public partial class MyExternalScript : GH_ScriptInstance
                     }
                 }
                 bot.Ran = true;
-                bot.Animate(bot.RobotSteps, 5);
+                bot.Animate(bot.RobotSteps, 20);
             }
 
-            Robot testBot = new Robot(axes, rootFrame, endFrame, bodies, range, error, angleError, iterations);
-            testBot.GoToState(bot.RobotSteps[0]);
-            for (int i = 0; i < axisControl.Count; i++)
+            //RhinoApp.WriteLine("bot.AnimationFrames.Count = {0}", bot.AnimationFrames.Count);
+
+            if (animate)
             {
-                testBot.RotateJoint(i, axisControl[i] - testBot.JointAngles[i]);
+                if (stepInternal < bot.AnimationFrames.Count-1) stepInternal++;
             }
-            testBot.ApplyBodies();
+            else
+            {
+                stepInternal = step;
+            }
+
+
+
+            //Robot testBot = new Robot(axes, rootFrame, endFrame, bodies, range, error, angleError, iterations);
+            //testBot.GoToState(bot.RobotSteps[0]);
+            //for (int i = 0; i < axisControl.Count; i++)
+            //{
+            //    testBot.RotateJoint(i, axisControl[i] - testBot.JointAngles[i]);
+            //}
+            //testBot.ApplyBodies();
 
             List<Robot.RobotState> stepsOut = new List<Robot.RobotState>(bot.AnimationFrames);
-            if (step >= stepsOut.Count) step = stepsOut.Count - 1;
-            if (step < 0) step = 0;
-            if (stepsOut.Count > step) bot.GoToState(stepsOut[step]);
+            if (stepInternal >= stepsOut.Count) step = stepsOut.Count - 1;
+            if (stepInternal < 0) stepInternal = 0;
+            if (stepsOut.Count > stepInternal) bot.GoToState(stepsOut[stepInternal]);
             bot.ApplyBodies();
 
             if (bot.GoalSolved) Print("solve OK");
@@ -150,8 +162,8 @@ public partial class MyExternalScript : GH_ScriptInstance
             Bodies = bot.Bodies;
             TargetPlane = bot.TargetFrame;
             if (str.pathPlanes.Count > 0) GoalPlane = str.pathPlanes[path];
-            Solved = stepsOut[step].StateSolved;
-            TestOut = testBot.Bodies;
+            Solved = stepsOut[stepInternal].StateSolved;
+            TestOut = bot.OrientationPlanes;
 
         }
         // </Custom code>
@@ -159,9 +171,13 @@ public partial class MyExternalScript : GH_ScriptInstance
 
     // <Custom additional code>
 
+    int stepInternal = 0;
     Robot bot = new Robot();
     Structure str = new Structure();
     Plane targetPlane = new Plane();
+
+
+
     public class Robot
     {
         private List<Line> originalAxes = new List<Line>();
@@ -270,7 +286,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Ran = false;
             SaveState(ref robotStates, false);
             SaveState(ref robotSteps, false);
-            RhinoApp.WriteLine("initializing robot");
+            //RhinoApp.WriteLine("initializing robot");
         }
         public void Clear()
         {
@@ -393,7 +409,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             {
                 List<Plane> targets = new List<Plane>();
                 foreach (Plane p in strut.targetPlanes) targets.Add(p);
-                testOut.Add(strut.walkEnd);
                 targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strut.walkEnd - nextTarget), v.Normal)).ToList();
                 int rotations = 0;
                 while (!success && rotations < 4)
@@ -441,10 +456,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         StepSolved = Solve_IK(path[CurrentStrut + 1], path[CurrentStrut + 2].walkStart, false, 50);
                         if (StepSolved)         //try to reach next strut
                         {
-                            //NormalizeJointAngles();
-
                             CurrentStrut++;
-
                             SaveState(ref robotSteps, StepSolved);
                             FlipRobot();
 
@@ -454,11 +466,8 @@ public partial class MyExternalScript : GH_ScriptInstance
                             StepSolved = Solve_IK(path[CurrentStrut], path[CurrentStrut + 1].walkStart, false, 50);
                             if (StepSolved)
                             {
-                                //NormalizeJointAngles();
-
                                 SaveState(ref robotSteps, StepSolved);
                                 FlipRobot();
-
                             }
                             else Tries++;
                         }
@@ -469,22 +478,16 @@ public partial class MyExternalScript : GH_ScriptInstance
                         if (StepSolved)         //try to reach next strut
                         {
                             CurrentStrut++;
-                            //NormalizeJointAngles();
-
                             SaveState(ref robotSteps, StepSolved);
                             FlipRobot();
-
                         }
                         else        //else step on this strut
                         {
                             StepSolved = Solve_IK(path[CurrentStrut], path[CurrentStrut + 1].walkStart, false, 50);
                             if (StepSolved)
                             {
-                                //NormalizeJointAngles();
-
                                 SaveState(ref robotSteps, StepSolved);
                                 FlipRobot();
-
                             }
                             else Tries++;
                         }
@@ -495,8 +498,6 @@ public partial class MyExternalScript : GH_ScriptInstance
                         StepSolved = GoalSolved;
                         if (GoalSolved)
                         {
-                            //NormalizeJointAngles();
-
                             SaveState(ref robotSteps, true);
                             break;                                         //if not solved, go to nex path
                         }
@@ -505,11 +506,8 @@ public partial class MyExternalScript : GH_ScriptInstance
                             StepSolved = Solve_IK(path[CurrentStrut], goalFrame.Origin, false, 50);        //else step on this strut
                             if (StepSolved)
                             {
-                                //NormalizeJointAngles();
-
                                 SaveState(ref robotSteps, StepSolved);
                                 FlipRobot();
-
                             }
                             else Tries++;
                         }
@@ -667,24 +665,11 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             list.Add(new RobotState(RootFrame, JointAngles, OrientationPlanes, TotalIterations, TargetFrame, Flipped, solved));
         }
-        private void NormalizeJointAngles()
-        {
-            for (int i = 0; i < JointAngles.Count; i++)
-            {
-                RhinoApp.Write("before = {0} ..... ", JointAngles[i]);
-                JointAngles[i] = JointAngles[i] % Math.PI;
-                RhinoApp.WriteLine("after = {0}", JointAngles[i]);
-            }
-        }
-
-
         public void Animate(List<RobotState> states, int substates)
         {
             Robot animateBot = new Robot(OriginalAxes, OriginalRootFrame, OriginalEndFrame, OriginalBodies, JointRanges);
             for (int i = 0; i < states.Count - 1; i++)
             {
-                //animateBot.GoToState(states[i]);
-                //if (i > 1) 
                 animateBot.SaveState(ref animationFrames, false);
                 List<double> stepSizes = new List<double>();
                 for (int k = 0; k < animateBot.JointAngles.Count; k++) stepSizes.Add((states[i + 1].StateJointAngles[k] % (2 * Math.PI) - animateBot.JointAngles[k] % (2 * Math.PI)) / substates);
@@ -697,11 +682,8 @@ public partial class MyExternalScript : GH_ScriptInstance
                     animateBot.SaveState(ref animationFrames, false);
                 }
                 animateBot.FlipRobot();
-                //animateBot.SaveState(ref animationFrames, false);
             }
         }
-
-
         public void GoToState(RobotState state)
         {
             Flipped = state.StateFlipped;
@@ -743,11 +725,9 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
         }
 
-
         public class RobotState
         {
             private Plane stateTargetFrame;
-            private Plane stateAxes;
             private int stateIterations;
             private bool stateSolved;
             private bool stateFlipped;
