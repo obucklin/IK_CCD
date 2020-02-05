@@ -58,7 +58,7 @@ public partial class MyExternalScript : GH_ScriptInstance
     #endregion
 
 
-    private void RunScript(bool reset, List<Line> axes, Plane rootFrame, Plane endFrame, Plane target, bool orient, double collisionDist, DataTree<Mesh> bodies, DataTree<double> range, List<Polyline> structure, int iterations, double error, double angleError, int step, bool animate, int path, List<double> axisControl, ref object Angles, ref object EndPlane, ref object Bodies, ref object TargetPlane, ref object GoalPlane, ref object Solved, ref object TestOut)
+    private void RunScript(bool reset, List<Line> axes, Plane rootFrame, Plane endFrame, Plane target, bool orient, double collisionDist, DataTree<Mesh> bodies, DataTree<double> range, List<Polyline> structure, int iterations, double error, double angleError, int step, bool animate, int path, List<double> axisControl, ref object Angles, ref object EndPlane, ref object Bodies, ref object TargetPlane, ref object GoalPlane, ref object PathPlanes, ref object Solved, ref object TestOut)
     {
         // <Custom code>
 
@@ -150,7 +150,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             EndPlane = bot.EndFrame;
             Bodies = bot.Bodies;
             TargetPlane = bot.TargetFrame;
-            if (str.paths[path].Count > 0) GoalPlane = str.paths[path].planes;
+            if (str.paths[path].Count > 0) PathPlanes = str.paths[path].planes;
             Solved = stepsOut[stepInternal].StateSolved;
             TestOut = str.testOut;
         }
@@ -446,7 +446,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (TestDistance(strut))
             {
                 List<Plane> targets = new List<Plane>();
-                //testOut.Add(new Line(strut.walkEnd, nextTarget));
+                testOut.Add(new Line(strut.walkEnd, nextTarget));
 
                 foreach (Plane p in strut.targetPlanes) targets.Add(new Plane(p));
                 targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strut.walkEnd - nextTarget), v.Normal)).ToList();
@@ -884,7 +884,6 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
 
 
-
         public void GetPaths(Plane startPlane, Plane endPlane, double maxDistance)
         {
             List<List<Strut>> forwardPaths = new List<List<Strut>>();
@@ -894,70 +893,93 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             struts = struts.OrderBy(s => s.strutLine.DistanceTo(endPlane.Origin, true)).ToList();
             Strut targetStrut = struts[0];
-            targetStrut.walkEnd = startStrut.strutLine.ClosestPoint(endPlane.Origin, true);
+            //targetStrut.walkEnd = startStrut.strutLine.ClosestPoint(endPlane.Origin, true);
 
-            paths.Add(new Path());
-            paths.Last().Add(new Strut(startStrut));
+            List<Path> pathsTemp = new List<Path>();
+            pathsTemp.Add(new Path());
+            pathsTemp.Last().Add(new Strut(startStrut));
 
-            int forkCount = 0;
-            int currentPath = 0;
+            int branchCount = 1;
+            int branchesDone = 0;
+            int currentBranch = 0;
 
-            while (forkCount < 100 && currentPath <= forkCount)              // all the paths
+            while (branchCount < 100 && branchesDone < branchCount)              // all the paths
             {
                 int breakPt = 0;
                 bool connected = false;
                 bool deadEnd = false;
+                Path currentPath = pathsTemp[branchesDone];
 
                 if (startStrut == targetStrut) connected = true;
 
                 while (!connected && !deadEnd && breakPt < 100)            //loops until path is complete keep adding struts until connect, dead end, or timeout
                 {
+
                     bool firstOne = true;
-                    LineCurve endStrutLineCurve = new LineCurve(paths[currentPath].endStrut.strutLine);         // the current end of the path
-                    foreach (Strut s in struts)             //test each other strut
+
+                    LineCurve endStrutLineCurve = new LineCurve(currentPath.endStrut.strutLine);         // the current end of the path
+                    foreach (Strut testStrut in struts)                                     //test each other strut
                     {
-                        if (!paths[currentPath].indexList.Contains(s.index))      // dont double back or loop
+
+                        if (!currentPath.indexList.Contains(testStrut.index))      // dont double back or loop
                         {
                             Point3d pointOnEndStrut;
                             Point3d pointOnTestStrut;
-                            LineCurve testStrutLineCurve = new LineCurve(s.strutLine);
+                            LineCurve testStrutLineCurve = new LineCurve(testStrut.strutLine);
                             endStrutLineCurve.ClosestPoints(testStrutLineCurve, out pointOnEndStrut, out pointOnTestStrut);
+                            double dist = pointOnEndStrut.DistanceTo(pointOnTestStrut);
 
-                            if (pointOnEndStrut.DistanceTo(pointOnTestStrut) < maxDistance)         //if strut s is close enough
+                            if (dist < maxDistance)         //if strut s is close enough
                             {
-                                paths[currentPath].endStrut.walkEnd = pointOnEndStrut;
-
+                                
+                                currentPath.endStrut.walkEnd = pointOnEndStrut;
+                                //RhinoApp.WriteLine("HERE index{0} = {1}", testStrut.index, pointOnEndStrut.DistanceTo(pointOnTestStrut));
                                 if (firstOne)                                       // if first close strut
                                 {
-                                    paths[currentPath].Add(new Strut(s));
-                                    paths[currentPath].endStrut.walkStart = pointOnTestStrut;
+                                    currentPath.Add(new Strut(testStrut));
+                                    currentPath.endStrut.walkStart = pointOnTestStrut;
                                     firstOne = false;
+                                    if (testStrut.index == targetStrut.index)
+                                    {
+                                        Point3d testPt = currentPath.endStrut.strutLine.ClosestPoint(endPlane.Origin, true);
+                                        //RhinoApp.WriteLine("POINT index{0}", testPt);
+                                        currentPath.endStrut.walkEnd = testPt;
+                                        connected = true;
+                                        paths.Add(currentPath);
+                                        branchesDone++;
+                                    }
                                 }
                                 else                                       //if multiple struts
                                 {
-                                    forkCount++;
+                                    branchCount++;
                                     Path nextPath = new Path();
-                                    foreach (Strut st in paths[currentPath].struts) nextPath.Add(new Strut(st));    //separate copy of struts
-                                    nextPath.struts[nextPath.Count - 1] = new Strut(s);
+                                    for (int i = 0; i < currentPath.Count - 1; i++) nextPath.Add(new Strut(currentPath.struts[i]));    //separate copy of struts
+                                    nextPath.Add(new Strut(testStrut));
                                     nextPath.endStrut.walkStart = pointOnTestStrut;
-                                    paths.Add(nextPath);
-                                }
-                                if (s.index == targetStrut.index)
-                                {
-                                    connected = true;
+                                    pathsTemp.Add(new Path());
+                                    foreach (Strut s in nextPath.struts) pathsTemp.Last().Add(new Strut(s));
                                 }
                             }
                         }
                     }
-                    if (!firstOne) deadEnd = true;
-                    if (connected) currentPath++;
+                    if (firstOne)
+                    {
+                        deadEnd = true;
+                        branchesDone++;
+
+                    }
                     breakPt++;
                 }
 
-                foreach (Strut s in paths[currentPath].struts) testOut.Add(s.strutLine);
-                currentPath++;
+
+                currentBranch++;
             }
-            forwardPaths = forwardPaths.OrderBy(b => b.Count).ToList();
+            paths = paths.OrderBy(b => b.Count).ToList();
+            foreach (Strut s in paths[1].struts)
+            {
+                testOut.Add(s.walkEnd);
+                //RhinoApp.WriteLine("HERE index{0}", s.index);
+            }
         }
     }
     // </Custom additional code>
