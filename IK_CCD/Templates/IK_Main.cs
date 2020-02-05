@@ -491,7 +491,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 {
                     if (CurrentStrut < path.struts.Count - 1)                                //if not on last strut
                     {
-                        StepSolved = Solve_IK(path.struts[CurrentStrut + 1], OrientationPlanes[1].Origin, false);
+                        StepSolved = Solve_IK(path.struts[CurrentStrut + 1], OrientationPlanes[1].Origin, false, 50);
                         if (StepSolved)         //try to reach next strut
                         {
                             CurrentStrut++;
@@ -501,7 +501,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         }
                         else        //else step on this strut
                         {
-                            StepSolved = Solve_IK(path.struts[CurrentStrut], path.struts[CurrentStrut + 1].walkStart, false);
+                            StepSolved = Solve_IK(path.struts[CurrentStrut], path.struts[CurrentStrut + 1].walkStart, false, 50);
                             if (StepSolved)
                             {
                                 SaveState(ref robotSteps, StepSolved);
@@ -521,7 +521,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         }
                         else
                         {
-                            StepSolved = Solve_IK(path.struts[CurrentStrut], goalFrame.Origin, false);        //else step on this strut
+                            StepSolved = Solve_IK(path.struts[CurrentStrut], goalFrame.Origin, false, 50);        //else step on this strut
                             if (StepSolved)
                             {
                                 SaveState(ref robotSteps, StepSolved);
