@@ -57,7 +57,7 @@ public partial class MyExternalScript : GH_ScriptInstance
     #endregion
 
 
-    private void RunScript(bool reset, List<Line> axes, Plane rootFrame, Plane endFrame, Plane target, bool orient, DataTree<Brep> bodies, DataTree<double> range, List<Polyline> structure, int iterations, double error, double angleError, int step, bool animate, int path, List<double> axisControl, ref object Angles, ref object EndPlane, ref object Bodies, ref object TargetPlane, ref object GoalPlane, ref object Solved, ref object TestOut)
+    private void RunScript(bool reset, List<Line> axes, Plane rootFrame, Plane endFrame, Plane target, bool orient, DataTree<Mesh> bodies, DataTree<double> range, List<Polyline> structure, int iterations, double error, double angleError, int step, bool animate, int path, List<double> axisControl, ref object Angles, ref object EndPlane, ref object Bodies, ref object TargetPlane, ref object GoalPlane, ref object Solved, ref object TestOut)
     {
         // <Custom code>
 
@@ -170,8 +170,8 @@ public partial class MyExternalScript : GH_ScriptInstance
         private List<Plane> reverseOriginalOrientationPlanes = new List<Plane>();
         private List<Plane> orientationPlanes = new List<Plane>();
         private List<Plane> reverseOrientationPlanes = new List<Plane>();
-        private DataTree<Brep> originalBodies = new DataTree<Brep>();
-        private DataTree<Brep> bodies = new DataTree<Brep>();
+        private DataTree<Mesh> originalBodies = new DataTree<Mesh>();
+        private DataTree<Mesh> bodies = new DataTree<Mesh>();
         private List<double> jointAngles = new List<double>();
         private List<Line> errorLines = new List<Line> { new Line(), new Line(), new Line() };
         private double distThreshhold;
@@ -197,8 +197,8 @@ public partial class MyExternalScript : GH_ScriptInstance
         public DataTree<double> JointRanges { get { return jointRange; } set { jointRange = value; } }
         public List<Plane> OriginalOrientationPlanes { get { return originalOrientationPlanes; } set { originalOrientationPlanes = value; } }
         public List<Plane> OrientationPlanes { get { return orientationPlanes; } set { orientationPlanes = value; } }
-        public DataTree<Brep> OriginalBodies { get { return originalBodies; } set { originalBodies = value; } }
-        public DataTree<Brep> Bodies { get { return bodies; } set { bodies = value; } }
+        public DataTree<Mesh> OriginalBodies { get { return originalBodies; } set { originalBodies = value; } }
+        public DataTree<Mesh> Bodies { get { return bodies; } set { bodies = value; } }
         public List<double> JointAngles { get { return jointAngles; } set { jointAngles = value; } }
         public List<Line> ErrorLines { get { return errorLines; } set { errorLines = value; } }
         public double DistError { get { return Math.Abs(EndPoint.X - TargetFrame.Origin.X) + Math.Abs(EndPoint.Y - TargetFrame.Origin.Y) + Math.Abs(EndPoint.Z - TargetFrame.Origin.Z); } }
@@ -228,11 +228,11 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<RobotState> AnimationFrames { get { return animationFrames; } set { animationFrames = value; } }
         public List<object> testOut = new List<object>();
         public Robot() { }
-        public Robot(List<Line> axes, Plane rootPlane, Plane endPlane, DataTree<Brep> bodies, DataTree<double> jointRange, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)
+        public Robot(List<Line> axes, Plane rootPlane, Plane endPlane, DataTree<Mesh> bodies, DataTree<double> jointRange, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)
         {
             InitializeBot(axes, rootPlane, endPlane, bodies, jointRange, distThreshhold, angleThreshhold, maxIterations);
         }
-        public void InitializeBot(List<Line> axes, Plane rootPlane, Plane endPlane, DataTree<Brep> bodies, DataTree<double> jointRange, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)
+        public void InitializeBot(List<Line> axes, Plane rootPlane, Plane endPlane, DataTree<Mesh> bodies, DataTree<double> jointRange, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)
         {
             OriginalAxes = axes;
             OriginalBodies = bodies;
@@ -665,12 +665,12 @@ public partial class MyExternalScript : GH_ScriptInstance
                 for (int i = 0; i < OrientationPlanes.Count - 1; i++)
                 {
                     var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[i], OrientationPlanes[OrientationPlanes.Count - 1 - i]);
-                    foreach (Brep b in OriginalBodies.Branch(new GH_Path(i)))
+                    foreach (Mesh b in OriginalBodies.Branch(new GH_Path(i)))
                     {
-                        Brep brepTemp = new Brep();
-                        brepTemp = b.DuplicateBrep();
-                        brepTemp.Transform(reorient);
-                        Bodies.Add(brepTemp, new GH_Path(i));
+                        Mesh meshTemp = new Mesh();
+                        meshTemp = b.DuplicateMesh();
+                        meshTemp.Transform(reorient);
+                        Bodies.Add(meshTemp, new GH_Path(i));
                     }
                 }
             }
@@ -679,12 +679,12 @@ public partial class MyExternalScript : GH_ScriptInstance
                 for (int i = 0; i < OrientationPlanes.Count - 1; i++)
                 {
                     var reorient = Transform.PlaneToPlane(OriginalOrientationPlanes[i], OrientationPlanes[i]);
-                    foreach (Brep b in OriginalBodies.Branch(new GH_Path(i)))
+                    foreach (Mesh b in OriginalBodies.Branch(new GH_Path(i)))
                     {
-                        Brep brepTemp = new Brep();
-                        brepTemp = b.DuplicateBrep();
-                        brepTemp.Transform(reorient);
-                        Bodies.Add(brepTemp, new GH_Path(i));
+                        Mesh meshTemp = new Mesh();
+                        meshTemp = b.DuplicateMesh();
+                        meshTemp.Transform(reorient);
+                        Bodies.Add(meshTemp, new GH_Path(i));
                     }
                 }
             }
