@@ -139,7 +139,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (path >= str.paths.Count) path = str.paths.Count - 1;
             if (path < 0) path = 0;
             if (stepsOut.Count > stepInternal) bot.GoToState(stepsOut[stepInternal]);
-            bot.ApplyBodies();
+            //bot.ApplyBodies();
 
             Print("Path Count = {0}", str.paths.Count);
             if (bot.GoalSolved) Print("solve OK");
@@ -158,7 +158,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Print(stepsOut[stepInternal].Message + " " + stepsOut[stepInternal].StateSolved + " after iterations = " + stepsOut[stepInternal].StateIterations);
             Angles = bot.JointAngles;
             EndPlane = bot.EndFrame;
-            Bodies = bot.Bodies;
+            //Bodies = bot.Bodies;
             TargetPlane = bot.TargetFrame;
             if (str.paths[path].Count > 0) PathPlanes = str.paths[path].planes;
             Solved = stepsOut[stepInternal].StateSolved;
@@ -172,17 +172,17 @@ public partial class MyExternalScript : GH_ScriptInstance
     // <Custom additional code>
 
 
-    public override void DrawViewportMeshes(IGH_PreviewArgs args)
-    {
+    //public override void DrawViewportMeshes(IGH_PreviewArgs args)
+    //{
 
-        foreach (var bodies in bot.Bodies.Branches)
-        {
-            foreach (Mesh body in bodies)
-            {
-                args.Display.DrawMeshShaded(body, material);
-            }
-        }
-    }
+    //    foreach (var bodies in bot.Bodies.Branches)
+    //    {
+    //        foreach (Mesh body in bodies)
+    //        {
+    //            args.Display.DrawMeshShaded(body, material);
+    //        }
+    //    }
+    //}
 
 
     public override void DrawViewportWires(IGH_PreviewArgs args)
@@ -248,7 +248,15 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<Plane> OriginalOrientationPlanes { get { return originalOrientationPlanes; } set { originalOrientationPlanes = value; } }
         public List<Plane> OrientationPlanes { get { return orientationPlanes; } set { orientationPlanes = value; } }
         public DataTree<Mesh> OriginalBodies { get { return originalBodies; } set { originalBodies = value; } }
-        public DataTree<Mesh> Bodies { get { return bodies; } set { bodies = value; } }
+        public DataTree<Mesh> Bodies
+        {
+            get
+            {
+                ApplyBodies();
+                return bodies;
+            }
+            set { bodies = value; }
+        }
         public Polyline Skeleton
         {
             get
