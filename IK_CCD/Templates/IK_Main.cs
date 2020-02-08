@@ -66,7 +66,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             bot.Clear();
             Print("reset");
-            bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
+            bot.InitializeBot(axes, rootFrame, endFrame, 50, bodies, range, error, angleError, iterations);
             str = new Structure(structure);
             stepInternal = 0;
             material = new DisplayMaterial();
@@ -74,15 +74,14 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         else
         {
-
             if (!bot.IsSet)
             {
-                bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
+                bot.InitializeBot(axes, rootFrame, endFrame, 50, bodies, range, error, angleError, iterations);
             }
-            if (targetPlane.Origin != target.Origin || targetPlane.XAxis != target.XAxis || targetPlane.Normal != target.Normal)
+            if (targetInternal.Origin != target.Origin || targetInternal.XAxis != target.XAxis || targetInternal.Normal != target.Normal)
             {
                 RhinoApp.WriteLine("targetMoved");
-                targetPlane = target;
+                targetInternal = target;
                 bot.Restart(false);
                 str = new Structure(structure);
                 stepInternal = 0;
@@ -90,7 +89,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (structure.Count > 0 && !bot.Ran)
             {
                 stopwatch.Restart();
-                str.GetPaths(bot.RootFrame, targetPlane, 200);
+                str.GetPaths(bot.RootFrame, targetInternal, 200);
                 PathTime = stopwatch.ElapsedMilliseconds;
 
             }
@@ -102,19 +101,19 @@ public partial class MyExternalScript : GH_ScriptInstance
                     if (orient)
                     {
                         RhinoApp.WriteLine("Solving with orient");
-                        bot.GoalSolved = bot.Solve_IK(targetPlane);
+                        bot.GoalSolved = bot.Solve_IK(targetInternal);
                     }
                     else
                     {
                         RhinoApp.WriteLine("Solving no orient");
-                        bot.GoalSolved = bot.Solve_IK(targetPlane.Origin);
+                        bot.GoalSolved = bot.Solve_IK(targetInternal.Origin);
                     }
                 }
                 else
                 {
                     if (orient)
                     {
-                        bot.GoalSolved = bot.Solve_Path(targetPlane, str, false);
+                        bot.GoalSolved = bot.Solve_Path(targetInternal, str, false);
                     }
                 }
                 IKTime = stopwatch.ElapsedMilliseconds;
@@ -139,7 +138,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (path >= str.paths.Count) path = str.paths.Count - 1;
             if (path < 0) path = 0;
             if (stepsOut.Count > stepInternal) bot.GoToState(stepsOut[stepInternal]);
-            bot.ApplyBodies();
+            //bot.ApplyBodies();
 
             Print("Path Count = {0}", str.paths.Count);
             if (bot.GoalSolved) Print("solve OK");
@@ -158,7 +157,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Print(stepsOut[stepInternal].Message + " " + stepsOut[stepInternal].StateSolved + " after iterations = " + stepsOut[stepInternal].StateIterations);
             Angles = bot.JointAngles;
             EndPlane = bot.EndFrame;
-            Bodies = bot.Bodies;
+            //Bodies = bot.Bodies;
             TargetPlane = bot.TargetFrame;
             if (str.paths[path].Count > 0) PathPlanes = str.paths[path].planes;
             Solved = stepsOut[stepInternal].StateSolved;
@@ -202,7 +201,7 @@ public partial class MyExternalScript : GH_ScriptInstance
     int stepInternal = 0;
     Robot bot = new Robot();
     Structure str = new Structure();
-    Plane targetPlane = new Plane();
+    Plane targetInternal = new Plane();
     Stopwatch stopwatch = new Stopwatch();
     double IKTime = 0;
     double PathTime = 0;
@@ -248,7 +247,9 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<Plane> OriginalOrientationPlanes { get { return originalOrientationPlanes; } set { originalOrientationPlanes = value; } }
         public List<Plane> OrientationPlanes { get { return orientationPlanes; } set { orientationPlanes = value; } }
         public DataTree<Mesh> OriginalBodies { get { return originalBodies; } set { originalBodies = value; } }
-        public DataTree<Mesh> Bodies { get { return bodies; } set { bodies = value; } }
+        public DataTree<Mesh> Bodies { get {
+                ApplyBodies();
+                return bodies; } set { bodies = value; } }
         public Polyline Skeleton
         {
             get
@@ -732,7 +733,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             for (int i = 0; i < state.StateOrientationPlanes.Count; i++) OrientationPlanes[i] = new Plane(state.StateOrientationPlanes[i]);
             for (int i = 0; i < state.StateJointAngles.Count; i++) JointAngles[i] = state.StateJointAngles[i];
         }
-        public void ApplyBodies()
+        private void ApplyBodies()
         {
             Bodies.Clear();
 
