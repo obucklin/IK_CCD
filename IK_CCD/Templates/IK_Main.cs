@@ -74,7 +74,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         else
         {
-
+            if (str.struts.Count <1) str = new Structure(structure);
             if (!bot.IsSet)
             {
                 bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
@@ -83,8 +83,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             {
                 RhinoApp.WriteLine("targetMoved");
                 targetPlane = target;
-                bot.Restart(false);
-                str = new Structure(structure);
+                bot.Restart(false, targetPlane);
                 stepInternal = 0;
             }
             if (!bot.GoalSolved && !bot.Ran)
@@ -381,7 +380,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             IsSet = false;
             Ran = false;
         }
-        public void Restart(bool startAtEnd)
+        public void Restart(bool startAtEnd, Plane target)
         {
             GoalSolved = false;
             TotalIterations = 0;
@@ -395,6 +394,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             SaveState(ref robotSteps, true, "restart position");
             AnimationFrames.Clear();
             SaveState(ref animationFrames, true, "restart position");
+            GoalFrame = target;
         }
         public bool TestDistance(Point3d target, double threshhold = 1, int maxIterations = 20)            // Location Only
         {
@@ -534,6 +534,8 @@ public partial class MyExternalScript : GH_ScriptInstance
             bool success = false;
             GoalFrame = target;
             int i = 0;
+            Stopwatch sw = new Stopwatch();
+            sw.Restart();
             foreach (Structure.Path path in paths)
             {
                 i++;
@@ -594,6 +596,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                     Tries = 0;
                 }
             }
+            RhinoApp.WriteLine("IK Solver Time = {0}", sw.Elapsed);
             if (!GoalSolved) Solve_IK(GoalFrame, false);
             return success;
         }
@@ -800,11 +803,8 @@ public partial class MyExternalScript : GH_ScriptInstance
     {
         public List<Polyline> structure = new List<Polyline>();
         public List<Strut> struts = new List<Strut>();
-        public Line first;
-        public Line last;
         public List<object> testOut = new List<object>();
         public List<List<int>> neighborTree = new List<List<int>>();
-        //public List<List<int>> paths = new List<List<int>>();
 
         public Structure()
         {
@@ -821,7 +821,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             for (int i = 0; i < data.Count; i++)
             {
-                RhinoApp.Write("strut {0}:", i);
+                RhinoApp.Write("path {0}:", i);
 
                 foreach (int j in data[i])
                 {
@@ -832,24 +832,18 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
         }
 
-        public List<Path> GetPaths(Plane startPlane, Plane endPlane, double maxDistance, double collisionDist)
+        public List<Path> GetPaths(Plane startPlane, Plane targetPlane, double maxDistance, double collisionDist)
         {
             List<Path> Paths = new List<Path>();
-            List<Strut> sortedStruts = new List<Strut>();
-            sortedStruts = struts.OrderBy(s => s.strutLine.DistanceTo(startPlane.Origin, true)).ToList();
-            Strut startStrut = sortedStruts[0];
-            RhinoApp.Write("startStrut {0}", startStrut.index);
+            int startIndex = struts.OrderBy(s => s.strutLine.DistanceTo(startPlane.Origin, true)).ToList()[0].index;
 
-            startStrut.walkStart = startStrut.strutLine.ClosestPoint(startPlane.Origin, true);
-            sortedStruts = struts.OrderBy(s => s.strutLine.DistanceTo(endPlane.Origin, true)).ToList();
-            Strut targetStrut = sortedStruts[0];
-            RhinoApp.Write("targetStrut {0}", targetStrut.index);
+            struts[startIndex].walkStart = struts[startIndex].strutLine.ClosestPoint(startPlane.Origin, true);
+            int targetIndex = struts.OrderBy(s => s.strutLine.DistanceTo(targetPlane.Origin, true)).ToList()[0].index;
 
-            //targetStrut.walkEnd = targetStrut.strutLine.ClosestPoint(endPlane.Origin, true);
-            if (targetStrut.index == startStrut.index)
+            if (startIndex == targetIndex)
             {
-                Paths.Add(new Path());                
-                Paths[0].Add(targetStrut);
+                Paths.Add(new Path());
+                Paths[0].Add(struts[targetIndex]);
             }
             else
             {
@@ -862,7 +856,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 }
 
                 pathsOut.Add(new List<int>());
-                pathsOut[0].Add(startStrut.index);
+                pathsOut[0].Add(startIndex);
 
                 int breaker = 0;
                 int currentPath = 0;
@@ -870,8 +864,14 @@ public partial class MyExternalScript : GH_ScriptInstance
                 {
                     bool connected = false;
                     bool deadEnd = false;
-                    while (!connected && !deadEnd)
+                    while (!connected && !deadEnd)  // keep working on same path
                     {
+                        if (pathsOut[currentPath].Last() == targetIndex)
+                        {
+                            connected = true;
+                            currentPath++;
+                            break;
+                        }
                         bool oneDone = false;
                         foreach (int testIndex in neighborTree[pathsOut[currentPath].Last()])
                         {
@@ -888,17 +888,13 @@ public partial class MyExternalScript : GH_ScriptInstance
                                     pathTemp[pathTemp.Count - 1] = testIndex;
                                     pathsOut.Add(new List<int>(pathTemp));
                                 }
-                                if (targetStrut.index == testIndex)             //connected
-                                {
-                                    connected = true;
-                                    currentPath++;
-                                }
                             }
                         }
                         if (!oneDone && !connected)                         //dead end
                         {
                             deadEnd = true;
                             pathsOut.RemoveAt(currentPath);
+                            break;
                         }
                     }
                     breaker++;
@@ -929,16 +925,11 @@ public partial class MyExternalScript : GH_ScriptInstance
                         thisLine.ClosestPoints(nextLine, out thisPoint, out nextPoint);
                         path.struts[i].walkEnd = thisPoint;
                     }
-                    path.struts[path.struts.Count - 1].walkEnd = path.struts[path.struts.Count - 1].strutLine.ClosestPoint(endPlane.Origin, true);
+                    path.struts[path.struts.Count - 1].walkEnd = path.struts[path.struts.Count - 1].strutLine.ClosestPoint(targetPlane.Origin, true);
                 }
             }
             return Paths;
         }
-
-
-
-
-
 
         public class Strut : Structure
         {
@@ -1060,247 +1051,5 @@ public partial class MyExternalScript : GH_ScriptInstance
 
 
 
-
-
-
-
-
-
-
-    //    public class Structure
-    //{
-    //    public List<Polyline> structure = new List<Polyline>();
-    //    public List<Strut> struts = new List<Strut>();
-    //    public List<Path> paths = new List<Path>();
-    //    public Line first;
-    //    public Line last;
-    //    public List<object> testOut = new List<object>();
-    //    public List<List<int>> neighborTree = new List<List<int>>();
-
-    //    public Structure()
-    //    {
-    //    }
-    //    public Structure(List<Polyline> inputCurves)
-    //    {
-    //        for (int i = 0; i < inputCurves.Count; i++)
-    //        {
-    //            struts.Add(new Strut(inputCurves[i], i));
-    //        }
-    //    }
-
-    //    public void Replan()
-    //    {
-    //        testOut.Clear();
-    //        paths.Clear();
-    //    }
-
-    //    public class Path
-    //    {
-    //        public List<Strut> struts = new List<Strut>();
-    //        public List<int> indexList = new List<int>();
-    //        public List<Plane> planes = new List<Plane>();
-    //        public Strut endStrut { get { return struts.Last(); } }
-    //        public int Count { get { return struts.Count; } }
-    //        public List<Line> connectorLines
-    //        {
-    //            get
-    //            {
-    //                List<Line> linestemp = new List<Line>();
-    //                for (int i = 0; i < struts.Count - 1; i++)
-    //                {
-    //                    Line cl = new Line(struts[i].walkEnd, struts[i + 1].walkStart);
-    //                    linestemp.Add(cl);
-    //                }
-    //                return linestemp;
-    //            }
-    //        }
-
-    //        public Path() { }
-
-    //        public void Add(Strut strut)
-    //        {
-    //            struts.Add(strut);
-    //            indexList.Add(strut.index);
-    //            planes.Add(strut.basePlane);
-    //        }
-
-    //        public void PrintPath()
-    //        {
-    //            foreach (Strut s in struts) RhinoApp.Write("{0}..", s.index);
-    //            RhinoApp.WriteLine("");
-    //        }
-    //    }
-    //    public class IntPath
-    //    {
-    //        public List<int> indexList = new List<int>();
-
-    //        public int EndStrut {get{return indexList.Last();} } 
-
-    //        public IntPath() { }
-
-    //        public void Add(int index)
-    //        {
-    //            indexList.Add(index);
-    //        }
-
-
-    //    }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    //    }
-
-
-
-    //    public void GetPaths(Plane startPlane, Plane endPlane, double maxDistance,)
-    //    {
-
-    //        //List<List<Strut>> forwardPaths = new List<List<Strut>>();
-    //        List<Strut> sortedStruts = new List<Strut>();
-    //        sortedStruts = struts.OrderBy(s => s.strutLine.DistanceTo(startPlane.Origin, true)).ToList();
-    //        Strut startStrut = sortedStruts[0];
-    //        startStrut.walkStart = startStrut.strutLine.ClosestPoint(startPlane.Origin, true);
-    //        sortedStruts = struts.OrderBy(s => s.strutLine.DistanceTo(endPlane.Origin, true)).ToList();
-    //        Strut targetStrut = sortedStruts[0];
-
-    //        pathsTemp.Add(new Path());
-    //        pathsTemp.Last().Add(new Strut(startStrut));
-
-    //        foreach (Strut strut in struts)
-    //        {
-    //            strut.getNeighbors(200, 360, struts);
-    //            neighborTree.Add(strut.neighbors);
-    //        }
-
-    //        tree [0].Add(startStrut.index);
-
-
-
-    //        IntPath thisPath = new IntPath();
-    //        thisPath.Add(startStrut.index);
-    //        List<IntPath> paths = new List<IntPath>();
-    //        paths.Add(thisPath);
-    //        bool didOne = false;
-    //        foreach (IntPath path in paths)
-    //        {
-    //            if 
-    //        }
-
-    //        thisPath.indexList.Add(startStrut.index);
-    //        bool firstOne;
-    //        foreach (int index in startStrut.neighbors)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    //        int branchesDone = 0;
-
-    //        while (paths.Count < 100 && branchesDone < pathsTemp.Count)              // new Path
-    //        {
-    //            int breakPt = 0;
-    //            bool connected = false;
-    //            bool deadEnd = false;
-    //            Path currentPath = new Path();
-    //            foreach (Strut s in pathsTemp[branchesDone].struts) currentPath.Add(new Strut(s));
-    //            if (startStrut == targetStrut)
-    //            {
-    //                connected = true;
-    //                paths.Add(currentPath);
-    //                break;
-    //            }
-    //            while (!connected && !deadEnd && breakPt < 100)            //loops until path is complete keep adding struts until connect, dead end, or timeout
-    //            {
-    //                bool firstOne = true;
-    //                LineCurve endStrutLineCurve = new LineCurve(currentPath.endStrut.strutLine);         // the current end of the path
-    //                foreach (Strut testStrut in struts)                                     //test each other strut
-    //                {
-    //                    if (!currentPath.indexList.Contains(testStrut.index))      // dont double back or loop
-    //                    {
-    //                        Point3d pointOnEndStrut;
-    //                        Point3d pointOnTestStrut;
-    //                        LineCurve testStrutLineCurve = new LineCurve(testStrut.strutLine);
-    //                        endStrutLineCurve.ClosestPoints(testStrutLineCurve, out pointOnEndStrut, out pointOnTestStrut);
-    //                        double dist = pointOnEndStrut.DistanceTo(pointOnTestStrut);
-
-    //                        if (dist < maxDistance)         //if strut s is close enough
-    //                        {
-
-    //                            currentPath.endStrut.walkEnd = pointOnEndStrut;
-    //                            testStrut.walkStart = pointOnTestStrut;
-    //                            if (firstOne)                                       // if first close strut
-    //                            {
-    //                                firstOne = false;
-    //                                if (testStrut.index == targetStrut.index)
-    //                                {
-    //                                    connected = true;
-    //                                    Point3d testPt = currentPath.endStrut.strutLine.ClosestPoint(endPlane.Origin, true);
-    //                                    currentPath.endStrut.walkEnd = testPt;
-    //                                }
-    //                                else testStrut.walkStart = pointOnTestStrut;
-    //                                currentPath.Add(new Strut(testStrut));
-    //                            }
-    //                            else                                       //if multiple struts
-    //                            {
-    //                                pathsTemp.Add(new Path());
-    //                                for (int i = 0; i < currentPath.Count - 1; i++) pathsTemp[pathsTemp.Count - 1].Add(new Strut(currentPath.struts[i]));
-    //                                pathsTemp[pathsTemp.Count - 1].endStrut.walkEnd = pointOnEndStrut;
-    //                                pathsTemp[pathsTemp.Count - 1].Add(new Strut(testStrut));
-    //                            }
-    //                            if (connected)
-    //                            {
-    //                                paths.Add(currentPath);
-    //                                branchesDone++;
-    //                            }
-    //                        }
-    //                    }
-    //                }
-    //                if (firstOne)
-    //                {
-    //                    deadEnd = true;
-    //                    branchesDone++;
-    //                }
-    //                breakPt++;
-    //            }
-    //        }
-    //        paths = paths.OrderBy(b => b.Count).ToList();
-    //        for (int i = 0; i < paths.Count; i++)
-    //        {
-    //            for (int j = 0; j < paths[i].Count; j++)
-    //            {
-    //                if (j == paths[i].Count - 1) paths[i].struts[j].walkEnd = paths[i].struts[j].strutLine.ClosestPoint(endPlane.Origin, true);
-    //                for (int k = 0; k < 4; k++)
-    //                {
-    //                    Plane tTemp = new Plane(paths[i].struts[j].targetPlanes[k]);
-    //                    tTemp.Origin = paths[i].struts[j].walkEnd;
-    //                    paths[i].struts[j].targetPlanes[k] = tTemp;
-    //                }
-    //            }
-    //        }
-    //    }
-    //}
     // </Custom additional code>
 }
