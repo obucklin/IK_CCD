@@ -66,7 +66,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             bot.Clear();
             Print("reset");
-            bot.InitializeBot(axes, rootFrame, endFrame, 50, bodies, range, error, angleError, iterations);
+            bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
             str = new Structure(structure);
             stepInternal = 0;
             material = new DisplayMaterial();
@@ -74,14 +74,15 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         else
         {
+
             if (!bot.IsSet)
             {
-                bot.InitializeBot(axes, rootFrame, endFrame, 50, bodies, range, error, angleError, iterations);
+                bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
             }
-            if (targetInternal.Origin != target.Origin || targetInternal.XAxis != target.XAxis || targetInternal.Normal != target.Normal)
+            if (targetPlane.Origin != target.Origin || targetPlane.XAxis != target.XAxis || targetPlane.Normal != target.Normal)
             {
                 RhinoApp.WriteLine("targetMoved");
-                targetInternal = target;
+                targetPlane = target;
                 bot.Restart(false);
                 str = new Structure(structure);
                 stepInternal = 0;
@@ -89,7 +90,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (structure.Count > 0 && !bot.Ran)
             {
                 stopwatch.Restart();
-                str.GetPaths(bot.RootFrame, targetInternal, 200);
+                str.GetPaths(bot.RootFrame, targetPlane, 200);
                 PathTime = stopwatch.ElapsedMilliseconds;
 
             }
@@ -101,19 +102,19 @@ public partial class MyExternalScript : GH_ScriptInstance
                     if (orient)
                     {
                         RhinoApp.WriteLine("Solving with orient");
-                        bot.GoalSolved = bot.Solve_IK(targetInternal);
+                        bot.GoalSolved = bot.Solve_IK(targetPlane);
                     }
                     else
                     {
                         RhinoApp.WriteLine("Solving no orient");
-                        bot.GoalSolved = bot.Solve_IK(targetInternal.Origin);
+                        bot.GoalSolved = bot.Solve_IK(targetPlane.Origin);
                     }
                 }
                 else
                 {
                     if (orient)
                     {
-                        bot.GoalSolved = bot.Solve_Path(targetInternal, str, false);
+                        bot.GoalSolved = bot.Solve_Path(targetPlane, str, false);
                     }
                 }
                 IKTime = stopwatch.ElapsedMilliseconds;
@@ -138,7 +139,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (path >= str.paths.Count) path = str.paths.Count - 1;
             if (path < 0) path = 0;
             if (stepsOut.Count > stepInternal) bot.GoToState(stepsOut[stepInternal]);
-            //bot.ApplyBodies();
+            bot.ApplyBodies();
 
             Print("Path Count = {0}", str.paths.Count);
             if (bot.GoalSolved) Print("solve OK");
@@ -157,7 +158,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Print(stepsOut[stepInternal].Message + " " + stepsOut[stepInternal].StateSolved + " after iterations = " + stepsOut[stepInternal].StateIterations);
             Angles = bot.JointAngles;
             EndPlane = bot.EndFrame;
-            //Bodies = bot.Bodies;
+            Bodies = bot.Bodies;
             TargetPlane = bot.TargetFrame;
             if (str.paths[path].Count > 0) PathPlanes = str.paths[path].planes;
             Solved = stepsOut[stepInternal].StateSolved;
@@ -201,7 +202,7 @@ public partial class MyExternalScript : GH_ScriptInstance
     int stepInternal = 0;
     Robot bot = new Robot();
     Structure str = new Structure();
-    Plane targetInternal = new Plane();
+    Plane targetPlane = new Plane();
     Stopwatch stopwatch = new Stopwatch();
     double IKTime = 0;
     double PathTime = 0;
@@ -220,6 +221,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         private DataTree<Mesh> originalBodies = new DataTree<Mesh>();
         private DataTree<Mesh> bodies = new DataTree<Mesh>();
         private double collisionRadius;
+        private double collisionRadiusSquare;
         private List<double> jointAngles = new List<double>();
         private List<Line> errorLines = new List<Line> { new Line(), new Line(), new Line() };
         private double distThreshhold;
@@ -227,6 +229,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         private List<RobotState> robotSteps = new List<RobotState>();
         private List<RobotState> robotStates = new List<RobotState>();
         private List<RobotState> animationFrames = new List<RobotState>();
+        private List<RobotState> cdAnimationFrames = new List<RobotState>();
         private Plane targetFrame;
         private Plane goalFrame;
         private int currentStrut;
@@ -240,26 +243,31 @@ public partial class MyExternalScript : GH_ScriptInstance
         private bool goalSolved = false;
         private bool isSet = false;
         private bool ran = false;
+        private bool collisionDetection = false;
+        private bool collisionDetectionEnd = false;
+        private bool saveFlag = false;
         public List<object> testOut = new List<object>();
+        private Structure robotStructure;
 
         public List<Line> OriginalAxes { get { return originalAxes; } set { originalAxes = value; } }
         public DataTree<double> JointRanges { get { return jointRange; } set { jointRange = value; } }
         public List<Plane> OriginalOrientationPlanes { get { return originalOrientationPlanes; } set { originalOrientationPlanes = value; } }
         public List<Plane> OrientationPlanes { get { return orientationPlanes; } set { orientationPlanes = value; } }
         public DataTree<Mesh> OriginalBodies { get { return originalBodies; } set { originalBodies = value; } }
-        public DataTree<Mesh> Bodies { get {
-                ApplyBodies();
-                return bodies; } set { bodies = value; } }
-        public Polyline Skeleton
+        public DataTree<Mesh> Bodies { get { return bodies; } set { bodies = value; } }
+        public PolylineCurve Skeleton
         {
             get
             {
                 Polyline skTemp = new Polyline();
-                foreach (Plane p in orientationPlanes) skTemp.Add(p.Origin);
-                return skTemp;
+                for (int i = 1; i < OrientationPlanes.Count; i++) skTemp.Add(OrientationPlanes[i].Origin);
+                return new PolylineCurve(skTemp); ;
             }
         }
-        public double CollisionRadius { get { return collisionRadius; } set { collisionRadius = value; } }
+
+        public double Length { get { return EndFrame.Origin.DistanceTo(RootFrame.Origin); } }
+        public double CollisionRadius { get { return collisionRadius; } set { collisionRadiusSquare = Math.Pow(value, 2); collisionRadius = value; } }
+        public double CollisionRadiusSquare { get { return collisionRadiusSquare; } set { collisionRadiusSquare = value; } }
         public List<double> JointAngles { get { return jointAngles; } set { jointAngles = value; } }
         public List<Line> ErrorLines { get { return errorLines; } set { errorLines = value; } }
         public double DistError { get { return Math.Abs(EndPoint.X - TargetFrame.Origin.X) + Math.Abs(EndPoint.Y - TargetFrame.Origin.Y) + Math.Abs(EndPoint.Z - TargetFrame.Origin.Z); } }
@@ -288,6 +296,12 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<RobotState> RobotSteps { get { return robotSteps; } set { robotSteps = value; } }
         public List<RobotState> RobotStates { get { return robotStates; } set { robotStates = value; } }
         public List<RobotState> AnimationFrames { get { return animationFrames; } set { animationFrames = value; } }
+        public List<RobotState> CDAnimationFrames { get { return cdAnimationFrames; } set { cdAnimationFrames = value; } }
+        public bool CollisionDetection { get => collisionDetection; set => collisionDetection = value; }
+        public Structure RobotStructure { get => robotStructure; set => robotStructure = value; }
+        public bool CollisionDetectionEnd { get => collisionDetectionEnd; set => collisionDetectionEnd = value; }
+        public bool SaveFlag { get => saveFlag; set => saveFlag = value; }
+
         public Robot() { }
         public Robot(List<Line> axes, Plane rootPlane, Plane endPlane, double collisionRadius, DataTree<Mesh> bodies, DataTree<double> jointRange, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)
         {
@@ -298,7 +312,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             OriginalAxes = axes;
             OriginalBodies = bodies;
             JointRanges = jointRange;
-            CollisionRadius = collisionRadius;
+            CollisionRadiusSquare = collisionRadius;
             RobotStates.Clear();
             RobotSteps.Clear();
             AnimationFrames.Clear();
@@ -589,7 +603,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations++;
             TotalIterations++;
         }
-        private void stepCCD(Plane target)
+        private void stepCCDOld(Plane target)
         {
             switch (Iterations % 4)
             {
@@ -638,6 +652,79 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations++;
             TotalIterations++;
         }
+
+        private void stepCCD(Plane target)
+        {
+            switch (Iterations % 4)
+            {
+                case 0:           // Orient for each axis-----Z
+                    if (AngleError > AngleThreshhold)
+                    {
+                        for (int i = JointAngles.Count - 1; i >= 0; i--)
+                        {
+                            double angle = getAngle(i, target.ZAxis, EndFrame.ZAxis);
+                            RotateJoint(i, angle);
+                            if (CollisionDetection)
+                            {
+                                CorrectCollision(i);
+                            }
+                        }
+                    }
+                    break;
+                case 1:          // Orient for each axis-----X
+                    if (AngleError > AngleThreshhold)
+                    {
+                        for (int i = JointAngles.Count - 1; i >= 0; i--)
+                        {
+                            double angle = getAngle(i, target.XAxis, EndFrame.XAxis);
+                            RotateJoint(i, angle);
+                            if (CollisionDetection)
+                            {
+                                CorrectCollision(i);
+                            }
+                        }
+                    }
+                    break;
+                case 2:
+                    if (DistError > DistThreshhold)
+                    {
+                        for (int i = 0; i < JointAngles.Count; i++)           // Position for each axis-----ORIGIN  
+                        {
+                            double angle = getAngle(i, target.Origin, EndFrame.Origin);
+                            RotateJoint(i, angle);
+                            if (CollisionDetection)
+                            {
+                                CorrectCollision(i);
+                            }
+                        }
+                    }
+
+                    break;
+                case 3:
+                    if (DistError > DistThreshhold)
+                    {
+                        for (int i = JointAngles.Count - 1; i >= 0; i--)           // Position for each axis-----ORIGIN  
+                        {
+                            double angle = getAngle(i, target.Origin, EndFrame.Origin);
+                            RotateJoint(i, angle);
+                            if (CollisionDetection)
+                            {
+                                CorrectCollision(i);
+                            }
+                        }
+                    }
+                    break;
+            }
+            if (SaveFlag) SaveState(ref cdAnimationFrames, GoalSolved, "Pre-correct after whole move");
+            if (CollisionDetectionEnd)
+            {
+                CorrectCollision(0);
+                SaveState(ref cdAnimationFrames, GoalSolved, "Pre-correct after whole move");
+            }
+            Iterations++;
+            TotalIterations++;
+        }
+
         private double getAngle(int joint, Point3d target, Point3d end)
         {
             Vector3d jointToEnd = new Vector3d(end - OrientationPlanes[joint + 1].Origin);
@@ -649,6 +736,9 @@ public partial class MyExternalScript : GH_ScriptInstance
                 angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
             return angle;
         }
+
+
+
         private double getAngle(int joint, Vector3d target, Vector3d end)
         {
             double angle = Vector3d.VectorAngle(end, target, OrientationPlanes[joint + 1]);
@@ -658,11 +748,29 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
                 angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
 
-            angle = angle * (1 - Math.Abs(end * OrientationPlanes[joint + 1].Normal));
+            if (CollisionDetection)
+            {
+                double angleMax = Math.Asin(CollisionRadius / Length);
+                if (angle > angleMax)
+                {
+                    angle = angleMax;
+                    SaveFlag = true;
+                }
+            }
+
+
+            angle *= (1 - Math.Abs(end * OrientationPlanes[joint + 1].Normal));
             angle = angle * (1 - Math.Abs(target * OrientationPlanes[joint + 1].Normal));
 
             return angle;
         }
+
+
+
+
+
+
+
         public void RotateJoint(int joint, double angle)
         {
             var rotate = Transform.Rotation(angle, OrientationPlanes[joint + 1].Normal, OrientationPlanes[joint + 1].Origin);
@@ -686,6 +794,32 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
             JointAngles[joint] += angle;
         }
+
+        public void CorrectCollision(int jointIndex)
+        {
+            Polyline skTemp = new Polyline();
+            for (int i = jointIndex; i < OrientationPlanes.Count; i++) skTemp.Add(OrientationPlanes[i].Origin);
+            PolylineCurve skeletonEnd = new PolylineCurve(skTemp);
+            foreach (int index in RobotStructure.struts[CurrentStrut].collisionRisks)
+            {
+                LineCurve testLine = new LineCurve(RobotStructure.struts[index].strutLine);
+                Point3d skeletonPoint, collisionPoint;
+                skeletonEnd.ClosestPoints(testLine, out skeletonPoint, out collisionPoint);
+                if (skeletonPoint.DistanceToSquared(collisionPoint) < CollisionRadiusSquare)
+                {
+                    Vector3d exitVector = new Vector3d(skeletonPoint - collisionPoint);
+                    exitVector = exitVector * CollisionRadiusSquare / exitVector.Length;
+                    double exitAngle = Vector3d.VectorAngle(new Vector3d(collisionPoint - OrientationPlanes[jointIndex].Origin), new Vector3d(collisionPoint + exitVector - OrientationPlanes[jointIndex].Origin), OrientationPlanes[jointIndex]);
+                    RotateJoint(jointIndex, exitAngle);
+
+                }
+            }
+        }
+
+
+
+
+
         public void FlipRobot()         // ONLY STUFF FOR IK
         {
             Flipped = !Flipped;
@@ -708,7 +842,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         public void Animate(List<RobotState> states, int substates)
         {
-            Robot animateBot = new Robot(OriginalAxes, OriginalRootFrame, OriginalEndFrame, CollisionRadius, OriginalBodies, JointRanges);
+            Robot animateBot = new Robot(OriginalAxes, OriginalRootFrame, OriginalEndFrame, CollisionRadiusSquare, OriginalBodies, JointRanges);
             animateBot.GoToState(RobotSteps[0]);
             for (int i = 0; i < states.Count - 1; i++)
             {
@@ -733,7 +867,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             for (int i = 0; i < state.StateOrientationPlanes.Count; i++) OrientationPlanes[i] = new Plane(state.StateOrientationPlanes[i]);
             for (int i = 0; i < state.StateJointAngles.Count; i++) JointAngles[i] = state.StateJointAngles[i];
         }
-        private void ApplyBodies()
+        public void ApplyBodies()
         {
             Bodies.Clear();
 
