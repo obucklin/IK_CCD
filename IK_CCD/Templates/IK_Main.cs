@@ -529,12 +529,14 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
 
             RhinoApp.WriteLine("Solving Path");
+            Stopwatch sw = new Stopwatch();
+            sw.Restart();
             Paths = structure.GetPaths(RootFrame, GoalFrame, 200, 360);
-            RhinoApp.WriteLine("currentstrut = {0}", Paths[0].struts[CurrentStrut].index);
+            RhinoApp.WriteLine("Path Solver Time = {0}", sw.ElapsedMilliseconds);
+
             bool success = false;
             GoalFrame = target;
             int i = 0;
-            Stopwatch sw = new Stopwatch();
             sw.Restart();
             foreach (Structure.Path path in paths)
             {
@@ -596,7 +598,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                     Tries = 0;
                 }
             }
-            RhinoApp.WriteLine("IK Solver Time = {0}", sw.Elapsed);
+            RhinoApp.WriteLine("IK Solver Time = {0}", sw.ElapsedMilliseconds);
             if (!GoalSolved) Solve_IK(GoalFrame, false);
             return success;
         }
