@@ -232,7 +232,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         private bool goalSolved = false;
         private bool isSet = false;
         private bool ran = false;
-        private bool testCollision = true;
+        private bool testCollision = false;
         private List<Structure.Path> paths = new List<Structure.Path>();
         private Structure robotStructure = new Structure();
 
