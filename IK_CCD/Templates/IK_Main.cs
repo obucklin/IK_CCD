@@ -106,7 +106,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 {
                     if (orient)
                     {
-                        bot.GoalSolved = bot.Solve_Path(targetPlane, str, false);
+                        bot.GoalSolved = bot.Solve_Path(targetPlane, str, true, false);
                     }
                 }
                 IKTime = stopwatch.ElapsedMilliseconds;
@@ -125,7 +125,8 @@ public partial class MyExternalScript : GH_ScriptInstance
                 stepInternal = step;
             }
 
-            List<Robot.RobotState> stepsOut = new List<Robot.RobotState>(bot.AnimationFrames);
+            List<Robot.RobotState> stepsOut = new List<Robot.RobotState>(bot.RobotStates);
+
             if (stepInternal >= stepsOut.Count) stepInternal = stepsOut.Count - 1;
             if (stepInternal < 0) stepInternal = 0;
             if (path >= bot.Paths.Count) path = bot.Paths.Count - 1;
@@ -393,7 +394,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Tries = 0;
             CurrentStrut = 0;
             Ran = false;
-            if (startAtEnd) if (RobotSteps.Count > 0) GoToState(RobotStates[RobotSteps.Count - 1]);
+            if (startAtEnd) if (RobotSteps.Count > 0) GoToState(RobotSteps[RobotSteps.Count - 1]);
             RobotSteps.Clear();
             Paths.Clear();
             SaveState(ref robotSteps, true, "restart position");
@@ -534,6 +535,75 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations = 0;
             return success;
         }
+
+        public bool GrabStrut(Structure.Strut strut, Point3d nextTarget, bool offsetSteps, bool record = false, int earlyBreak = 0)            //  with orientation
+        {
+            bool success = false;
+            if (TestDistance(strut))
+            {
+                Vector3d strutToBot = new Vector3d(strut.strutLine.ClosestPoint(OrientationPlanes[1].Origin, false) - OrientationPlanes[1].Origin);
+                strutToBot.Unitize();
+                Vector3d strutToNextTarget = new Vector3d(strut.strutLine.ClosestPoint(nextTarget, false) - nextTarget);
+                strutToNextTarget.Unitize();
+                List<Plane> targets = new List<Plane>();
+                foreach (Plane p in strut.targetPlanes) targets.Add(new Plane(p));
+                targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strutToBot + strutToNextTarget), v.Normal)).ToList();
+                int rotations = 0;
+                while (!success && rotations < 4)           //try each side of strut
+                {
+                    TargetFrame = targets[rotations];
+                    Line offsetLine = new Line(strut.strutLine.From - (targets[rotations].Normal) *1.5* CollisionRadius, strut.strutLine.To - (targets[rotations].Normal) * CollisionRadius);
+                    if (offsetSteps) targetFrame.Origin = offsetLine.ClosestPoint(EndFrame.Origin, true);
+                    else targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                    int k = 0;
+                    while (Iterations < MaxIterations && !success)
+                    {
+                        if (Iterations % 16 == 14)
+                        {
+                            if (offsetSteps) targetFrame.Origin = offsetLine.ClosestPoint(EndFrame.Origin, true);
+                            else targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                        }
+                        stepCCD(TargetFrame);
+                        if (record && Iterations == Math.Pow(2, k))
+                        {
+                            SaveState(ref robotStates, false);
+                            k++;
+                        }
+                        if (earlyBreak > 0 && Iterations == ((earlyBreak * 4) - 1) && (DistError > 10 || NormalError > 0.2)) break;
+                        if (DistError < DistThreshhold && AngleError < AngleThreshhold) success = true;
+                    }
+                    if (!success) rotations++;
+                    SaveState(ref robotSteps, success, "solveIK_StrutOFFSETS");
+                    Iterations = 0;
+                }
+                if (success && offsetSteps)
+                {
+                    targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                    success = false;
+                    offsetSteps = false;
+
+                    while (Iterations < MaxIterations && !success)
+                    {
+                        if (Iterations % 16 == 14)
+                        {
+                            targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                        }
+                        stepCCD(TargetFrame);
+                        if (DistError < DistThreshhold && AngleError < AngleThreshhold) success = true;
+                    }
+                    offsetSteps = true;
+
+                    rotations++;
+                    SaveState(ref robotSteps, success, "solveIK_ONStrut");
+                    Iterations = 0;
+                }
+            }
+            Iterations = 0;
+            return success;
+        }
+
+
+
         public bool Solve_Path(Plane target, Structure structure, bool offsetSteps, bool record = false)            // on Line Only
         {
 
@@ -556,7 +626,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 {
                     if (CurrentStrut < path.struts.Count - 1)                                //if not on last strut
                     {
-                        StepSolved = Solve_IK(path.struts[CurrentStrut + 1], OrientationPlanes[OrientationPlanes.Count - 2].Origin, true, 200);
+                        StepSolved = GrabStrut(path.struts[CurrentStrut + 1], OrientationPlanes[OrientationPlanes.Count - 2].Origin, offsetSteps, false, 200);
                         if (StepSolved)         //try to reach next strut
                         {
                             CurrentStrut++;
@@ -566,7 +636,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         }
                         else        //else step on this strut
                         {
-                            StepSolved = Solve_IK(path.struts[CurrentStrut], path.struts[CurrentStrut + 1].walkEnd, true, 200);
+                            StepSolved = GrabStrut(path.struts[CurrentStrut], path.struts[CurrentStrut + 1].walkEnd, offsetSteps, false, 200);
                             if (StepSolved)
                             {
                                 SaveState(ref robotSteps, StepSolved, "solveIK_Strut");
@@ -586,7 +656,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         }
                         else
                         {
-                            StepSolved = Solve_IK(path.struts[CurrentStrut], goalFrame.Origin, false, 50);        //else step on this strut
+                            StepSolved = GrabStrut(path.struts[CurrentStrut], goalFrame.Origin, offsetSteps, false, 200);        //else step on this strut
                             if (StepSolved)
                             {
                                 SaveState(ref robotSteps, StepSolved, "solveIK_Strut");
@@ -646,8 +716,9 @@ public partial class MyExternalScript : GH_ScriptInstance
                             RotateJoint(i, angle);
                             if (TestCollision)
                             {
+                                SaveState(ref robotStates, false, "bump");
                                 if (Collision(i)) RotateJoint(i, -angle);
-
+                                SaveState(ref robotStates, false, "de-bump");
                             }
                         }
                     }
@@ -661,8 +732,9 @@ public partial class MyExternalScript : GH_ScriptInstance
                             RotateJoint(i, angle);
                             if (TestCollision)
                             {
+                                SaveState(ref robotStates, false, "bump");
                                 if (Collision(i)) RotateJoint(i, -angle);
-
+                                SaveState(ref robotStates, false, "de-bump");
                             }
                         }
                     }
@@ -676,8 +748,9 @@ public partial class MyExternalScript : GH_ScriptInstance
                             RotateJoint(i, angle);
                             if (TestCollision)
                             {
+                                SaveState(ref robotStates, false, "bump");
                                 if (Collision(i)) RotateJoint(i, -angle);
-
+                                SaveState(ref robotStates, false, "de-bump");
                             }
                         }
                     }
@@ -692,7 +765,9 @@ public partial class MyExternalScript : GH_ScriptInstance
                             RotateJoint(i, angle);
                             if (TestCollision)
                             {
+                                SaveState(ref robotStates, false, "bump");
                                 if (Collision(i)) RotateJoint(i, -angle);
+                                SaveState(ref robotStates, false, "de-bump");
 
                             }
                         }
