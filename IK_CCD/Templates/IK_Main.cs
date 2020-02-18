@@ -206,6 +206,7 @@ public partial class MyExternalScript : GH_ScriptInstance
     {
         private List<Line> originalAxes = new List<Line>();
         private DataTree<double> jointRange = new DataTree<double>();
+        private List<double> maxAngles = new List<double>();
         private List<Plane> originalOrientationPlanes = new List<Plane>();
         private List<Plane> reverseOriginalOrientationPlanes = new List<Plane>();
         private List<Plane> orientationPlanes = new List<Plane>();
@@ -227,12 +228,17 @@ public partial class MyExternalScript : GH_ScriptInstance
         private int maxIterations;
         private int steps;
         private int tries;
+        private int collisions;
         private bool stepSolved = false;
         private bool flipped = false;
         private bool goalSolved = false;
         private bool isSet = false;
         private bool ran = false;
-        private bool testCollision = true;
+        private bool testCollision = false;
+        private bool testCollision1 = false;
+        private bool limitStep = false;
+        private bool saveFlag = false;
+        private bool lastFlag = false;
         private List<Structure.Path> paths = new List<Structure.Path>();
         private Structure robotStructure = new Structure();
 
@@ -281,7 +287,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
             set { bodies = value; }
         }
-
         public double CollisionRadius { get { return collisionRadius; } set { collisionRadius = value; } }
         public List<double> JointAngles { get { return jointAngles; } set { jointAngles = value; } }
         public double DistError { get { return Math.Abs(EndPoint.X - TargetFrame.Origin.X) + Math.Abs(EndPoint.Y - TargetFrame.Origin.Y) + Math.Abs(EndPoint.Z - TargetFrame.Origin.Z); } }
@@ -311,14 +316,34 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<RobotState> RobotStates { get { return robotStates; } set { robotStates = value; } }
         public List<RobotState> AnimationFrames { get { return animationFrames; } set { animationFrames = value; } }
         public List<Structure.Path> Paths { get { return paths; } set { paths = value; } }
-        public PolylineCurve SkeletonEnd(int joint)
-        {
-            Polyline skTemp = new Polyline();
-            for (int i = joint; i < OrientationPlanes.Count; i++)skTemp.Add(OrientationPlanes[i].Origin);
-            return new PolylineCurve(skTemp);
-        }
         public Structure RobotStructure { get { return robotStructure; } set { robotStructure = value; } }
         public bool TestCollision { get { return testCollision; } set { testCollision = value; } }
+        public bool TestCollision1 { get { return testCollision1; } set { testCollision1 = value; } }
+        public bool LimitStep { get { return limitStep; } set { limitStep = value; } }
+        public bool SaveFlag { get { return saveFlag; } set { saveFlag = value; } }
+        public int Collisions { get { return collisions; } set { collisions = value; } }
+        public List<double> MaxAngles { get { return maxAngles; } set { maxAngles = value; } }
+        public bool LastFlag { get { return lastFlag; } set { lastFlag = value; } }
+
+        //public double Length(int joint)
+        //{
+        //    Point3d ptProjected = OrientationPlanes[joint].ClosestPoint(EndPoint);
+        //    return OrientationPlanes[joint].Origin.DistanceTo(OrientationPlanes[joint].ClosestPoint(EndPoint));
+        //}
+        public PolylineCurve SkeletonEndPLC(int joint)
+        {
+            Polyline skTemp = new Polyline();
+            for (int i = joint; i < OrientationPlanes.Count; i++) skTemp.Add(OrientationPlanes[i].Origin);
+            return new PolylineCurve(skTemp);
+        }
+        public List<Line> SkeletonEnd(int joint)
+        {
+            List<Line> skTemp = new List<Line>();
+            for (int i = joint; i < OrientationPlanes.Count - 1; i++) skTemp.Add(new Line(OrientationPlanes[i].Origin, OrientationPlanes[i + 1].Origin));
+            return skTemp;
+        }
+
+
         public Robot() { }
         public Robot(List<Line> axes, Plane rootPlane, Plane endPlane, double collisionRadius, DataTree<Mesh> bodies, DataTree<double> jointRange, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)
         {
@@ -345,17 +370,18 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             //TargetFrame = EndFrame;
 
-            foreach (Line l in axes)
+            for (int i = 0; i < axes.Count; i++)
             {
-                OriginalOrientationPlanes.Add(new Plane(l.From, l.Direction));
+                OriginalOrientationPlanes.Add(new Plane(axes[i].From, axes[i].Direction));
                 JointAngles.Add(0.0);
+                maxAngles.Add(Math.Asin(CollisionRadius / axes[i].From.DistanceTo(endPlane.Origin)));
             }
             OriginalOrientationPlanes.Add(endPlane);
 
-            foreach (Plane p in OriginalOrientationPlanes)
-            {
-                OrientationPlanes.Add(p);
-            }
+            foreach (Plane p in OriginalOrientationPlanes) OrientationPlanes.Add(p);
+
+
+
             GoalSolved = false;
             IsSet = true;
             Ran = false;
@@ -377,6 +403,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Steps = 0;
             Tries = 0;
             CurrentStrut = 0;
+            Collisions = 0;
             Flipped = false;
             StepSolved = false;
             GoalSolved = false;
@@ -797,7 +824,33 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             angle = angle * (1 - Math.Abs(end * OrientationPlanes[joint + 1].Normal));
             angle = angle * (1 - Math.Abs(target * OrientationPlanes[joint + 1].Normal));
+            if (LimitStep)
+            {
+                //double angleMax = Math.Asin(CollisionRadius / (2 * OrientationPlanes[joint].Origin.DistanceTo(OrientationPlanes[joint].ClosestPoint(EndPoint))));
 
+                if (Math.Abs(angle) > maxAngles[joint + 1])
+                {
+                    if (angle < 0) angle = -maxAngles[joint + 1];
+                    else angle = maxAngles[joint + 1];
+                    SaveFlag = true;
+                }
+            }
+            if (TestCollision1)
+            {
+                foreach (Line line in SkeletonEnd(joint))
+                {
+                    foreach (int index in RobotStructure.struts[CurrentStrut].collisionRisks)
+                    {
+                        double skelT, strT;
+                        var intersect = Rhino.Geometry.Intersect.Intersection.LineLine(line, RobotStructure.struts[index].strutLine, out skelT, out strT, collisionRadius * 2, true);
+                        if (intersect)
+                        {
+                            Collisions++;
+                            testOut.Add(new Line(line.PointAt(skelT), RobotStructure.struts[index].strutLine.PointAt(strT)));
+                        }
+                    }
+                }
+            }
 
             return angle;
         }
@@ -811,11 +864,11 @@ public partial class MyExternalScript : GH_ScriptInstance
             Point3d strutCP, skelCP;
             int whichOne;
             List<GeometryBase> strutLines = new List<GeometryBase>();
-            foreach (int index in RobotStructure.struts[CurrentStrut].collisionRisks)  strutLines.Add(new LineCurve(RobotStructure.struts[index].strutLine));
-            SkeletonEnd(joint).ClosestPoints(strutLines, out skelCP, out strutCP, out whichOne);
-            correctionVector = new Vector3d(skelCP - strutCP);
+            foreach (int index in RobotStructure.struts[CurrentStrut].collisionRisks) strutLines.Add(new LineCurve(RobotStructure.struts[index].strutLine));
+            //SkeletonEnd(joint).ClosestPoints(strutLines, out skelCP, out strutCP, out whichOne);
+            //correctionVector = new Vector3d(skelCP - strutCP);
             correctionVector.Unitize();
-            correctionVector *= CollisionRadius - skelCP.DistanceTo(strutCP);
+            //correctionVector *= CollisionRadius - skelCP.DistanceTo(strutCP);
 
 
 
