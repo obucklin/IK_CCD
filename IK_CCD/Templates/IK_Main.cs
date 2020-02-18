@@ -74,7 +74,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         else
         {
-            if (str.struts.Count <1) str = new Structure(structure);
+            if (str.struts.Count < 1) str = new Structure(structure);
             if (!bot.IsSet)
             {
                 bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
@@ -232,7 +232,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         private bool goalSolved = false;
         private bool isSet = false;
         private bool ran = false;
-        private bool testCollision = false;
+        private bool testCollision = true;
         private List<Structure.Path> paths = new List<Structure.Path>();
         private Structure robotStructure = new Structure();
 
@@ -281,16 +281,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             }
             set { bodies = value; }
         }
-        //public List<Line> SkeletonEnd
-        //{
-        //    List<Line> skeletonTemp = new List<Line>;
-        //    get
-        //    {
-        //        Polyline skTemp = new Polyline();
-        //        foreach (Plane p in orientationPlanes) skTemp.Add(p.Origin);
-        //        return skTemp;
-        //    }
-        //}
+
         public double CollisionRadius { get { return collisionRadius; } set { collisionRadius = value; } }
         public List<double> JointAngles { get { return jointAngles; } set { jointAngles = value; } }
         public double DistError { get { return Math.Abs(EndPoint.X - TargetFrame.Origin.X) + Math.Abs(EndPoint.Y - TargetFrame.Origin.Y) + Math.Abs(EndPoint.Z - TargetFrame.Origin.Z); } }
@@ -320,8 +311,14 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<RobotState> RobotStates { get { return robotStates; } set { robotStates = value; } }
         public List<RobotState> AnimationFrames { get { return animationFrames; } set { animationFrames = value; } }
         public List<Structure.Path> Paths { get { return paths; } set { paths = value; } }
-        public Structure RobotStructure { get { return robotStructure; }  set { robotStructure = value; } }
-        public bool TestCollision { get { return testCollision; }  set { testCollision = value; } } 
+        public PolylineCurve SkeletonEnd(int joint)
+        {
+            Polyline skTemp = new Polyline();
+            for (int i = joint; i < OrientationPlanes.Count; i++)skTemp.Add(OrientationPlanes[i].Origin);
+            return new PolylineCurve(skTemp);
+        }
+        public Structure RobotStructure { get { return robotStructure; } set { robotStructure = value; } }
+        public bool TestCollision { get { return testCollision; } set { testCollision = value; } }
         public Robot() { }
         public Robot(List<Line> axes, Plane rootPlane, Plane endPlane, double collisionRadius, DataTree<Mesh> bodies, DataTree<double> jointRange, double distThreshhold = 0.1, double angleThreshhold = 0.01, int maxIterations = 5000)
         {
@@ -434,9 +431,9 @@ public partial class MyExternalScript : GH_ScriptInstance
         public bool Collision(int joint)
         {
             bool collision = true;
-            for (int i = joint; i < OrientationPlanes.Count-1; i++)
+            for (int i = joint; i < OrientationPlanes.Count - 1; i++)
             {
-               foreach(int collisionRiskIndex in RobotStructure.struts[CurrentStrut].collisionRisks)
+                foreach (int collisionRiskIndex in RobotStructure.struts[CurrentStrut].collisionRisks)
                 {
                     if (RobotStructure.struts[collisionRiskIndex].strutLine.MinimumDistanceTo(new Line(OrientationPlanes[i].Origin, OrientationPlanes[i + 1].Origin)) < CollisionRadius) collision = true;
                 }
@@ -552,9 +549,11 @@ public partial class MyExternalScript : GH_ScriptInstance
                 while (!success && rotations < 4)           //try each side of strut
                 {
                     TargetFrame = targets[rotations];
-                    Line offsetLine = new Line(strut.strutLine.From - (targets[rotations].Normal) *1.5* CollisionRadius, strut.strutLine.To - (targets[rotations].Normal) * CollisionRadius);
+                    Line offsetLine = new Line(strut.strutLine.From - (targets[rotations].Normal) * 1.5 * CollisionRadius, strut.strutLine.To - (targets[rotations].Normal) * CollisionRadius);
                     if (offsetSteps) targetFrame.Origin = offsetLine.ClosestPoint(EndFrame.Origin, true);
                     else targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                    TestDistance(TargetFrame.Origin);
+
                     int k = 0;
                     while (Iterations < MaxIterations && !success)
                     {
@@ -621,7 +620,6 @@ public partial class MyExternalScript : GH_ScriptInstance
             foreach (Structure.Path path in paths)
             {
                 i++;
-                foreach (Structure.Strut s in path.struts) testOut.Add(s.walkEnd);
                 while (CurrentStrut < path.struts.Count && Steps < 50 && Tries < 50)         // try to reach goal following path
                 {
                     if (CurrentStrut < path.struts.Count - 1)                                //if not on last strut
@@ -803,7 +801,47 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             return angle;
         }
+        private double getAngleCollision(int joint, Point3d target, Point3d end)
+        {
+            Vector3d jointToEnd = new Vector3d(end - OrientationPlanes[joint + 1].Origin);
+            Vector3d jointToGoal = new Vector3d(target - OrientationPlanes[joint + 1].Origin);
+            double angle = Vector3d.VectorAngle(jointToEnd, jointToGoal, OrientationPlanes[joint + 1]);
 
+            Vector3d correctionVector = new Vector3d();
+            Point3d strutCP, skelCP;
+            int whichOne;
+            List<GeometryBase> strutLines = new List<GeometryBase>();
+            foreach (int index in RobotStructure.struts[CurrentStrut].collisionRisks)  strutLines.Add(new LineCurve(RobotStructure.struts[index].strutLine));
+            SkeletonEnd(joint).ClosestPoints(strutLines, out skelCP, out strutCP, out whichOne);
+            correctionVector = new Vector3d(skelCP - strutCP);
+            correctionVector.Unitize();
+            correctionVector *= CollisionRadius - skelCP.DistanceTo(strutCP);
+
+
+
+
+            if (angle < Math.PI * (-2) || angle > Math.PI * (2)) angle = 0;
+            if (angle > Math.PI) angle = angle - (2 * Math.PI);
+            if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
+                angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
+            return angle;
+        }
+
+        private double getAngleCollision(int joint, Vector3d target, Vector3d end)
+        {
+            double angle = Vector3d.VectorAngle(end, target, OrientationPlanes[joint + 1]);
+
+            if (angle < Math.PI * (-2) || angle > Math.PI * (2)) angle = 0;
+            if (angle > Math.PI) angle = angle - (2 * Math.PI);
+            if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
+                angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
+
+            angle = angle * (1 - Math.Abs(end * OrientationPlanes[joint + 1].Normal));
+            angle = angle * (1 - Math.Abs(target * OrientationPlanes[joint + 1].Normal));
+
+
+            return angle;
+        }
         //public void getAngleAvoid(int joint, Point3d target, Point3d end)
         //{
         //    for (int i = joint; i < Skeleton.Count; i++)
