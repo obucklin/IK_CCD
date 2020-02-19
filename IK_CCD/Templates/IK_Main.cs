@@ -125,7 +125,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 stepInternal = step;
             }
 
-            List<Robot.RobotState> stepsOut = new List<Robot.RobotState>(bot.RobotStates);
+            List<Robot.RobotState> stepsOut = new List<Robot.RobotState>(bot.RobotSteps);
 
             if (stepInternal >= stepsOut.Count) stepInternal = stepsOut.Count - 1;
             if (stepInternal < 0) stepInternal = 0;
@@ -141,6 +141,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Print("Animate solve time = {0}", AnimateTime);
             Print("Error = {0}", bot.DistError);
             Print("AngleError = {0}", bot.AngleError);
+            Print("collisionCount = {0}", bot.Collisions);
 
             if (structure.Count > 0)
             {
@@ -201,8 +202,14 @@ public partial class MyExternalScript : GH_ScriptInstance
     double AnimateTime = 0;
 
     DisplayMaterial material;
+    public class IK_Solver
+    {
 
-    public class Robot
+
+
+
+    }
+    public class Robot : IK_Solver
     {
         private List<Line> originalAxes = new List<Line>();
         private DataTree<double> jointRange = new DataTree<double>();
@@ -235,8 +242,8 @@ public partial class MyExternalScript : GH_ScriptInstance
         private bool isSet = false;
         private bool ran = false;
         private bool testCollision = false;
-        private bool testCollision1 = false;
-        private bool limitStep = false;
+        private bool testCollision1 = true;
+        private bool limitStep = true;
         private bool saveFlag = false;
         private bool lastFlag = false;
         private List<Structure.Path> paths = new List<Structure.Path>();
@@ -325,11 +332,6 @@ public partial class MyExternalScript : GH_ScriptInstance
         public List<double> MaxAngles { get { return maxAngles; } set { maxAngles = value; } }
         public bool LastFlag { get { return lastFlag; } set { lastFlag = value; } }
 
-        //public double Length(int joint)
-        //{
-        //    Point3d ptProjected = OrientationPlanes[joint].ClosestPoint(EndPoint);
-        //    return OrientationPlanes[joint].Origin.DistanceTo(OrientationPlanes[joint].ClosestPoint(EndPoint));
-        //}
         public PolylineCurve SkeletonEndPLC(int joint)
         {
             Polyline skTemp = new Polyline();
@@ -398,6 +400,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             RobotStates.Clear();
             RobotSteps.Clear();
             AnimationFrames.Clear();
+            maxAngles.Clear();
             Iterations = 0;
             TotalIterations = 0;
             Steps = 0;
@@ -458,7 +461,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         public bool Collision(int joint)
         {
             bool collision = true;
-            for (int i = joint; i < OrientationPlanes.Count - 1; i++)
+            for (int i = joint+1; i < OrientationPlanes.Count - 1; i++)
             {
                 foreach (int collisionRiskIndex in RobotStructure.struts[CurrentStrut].collisionRisks)
                 {
@@ -713,7 +716,9 @@ public partial class MyExternalScript : GH_ScriptInstance
             {
                 for (int i = JointAngles.Count - 1; i >= 0; i--)           //for each axis-----ORIGIN  
                 {
-                    double angle = getAngle(i, target, EndFrame.Origin);
+                    int steps = 0;
+
+                    double angle = getAngle(i, target, EndFrame.Origin, out steps);
                     RotateJoint(i, angle);
                 }
             }
@@ -721,7 +726,9 @@ public partial class MyExternalScript : GH_ScriptInstance
             {
                 for (int i = 0; i < JointAngles.Count; i++)           //for each axis-----ORIGIN  
                 {
-                    double angle = getAngle(i, target, EndFrame.Origin);
+                    int steps = 0;
+
+                    double angle = getAngle(i, target, EndFrame.Origin, out steps);
                     RotateJoint(i, angle);
                 }
             }
@@ -737,8 +744,11 @@ public partial class MyExternalScript : GH_ScriptInstance
                     {
                         for (int i = JointAngles.Count - 1; i >= 0; i--)
                         {
-                            double angle = getAngle(i, target.ZAxis, EndFrame.ZAxis);
-                            RotateJoint(i, angle);
+                            int steps = 0;
+
+                            double angle = getAngle(i, target.ZAxis, EndFrame.ZAxis, out steps);
+                            MoveJoint(i, angle, steps);
+
                             if (TestCollision)
                             {
                                 SaveState(ref robotStates, false, "bump");
@@ -753,8 +763,11 @@ public partial class MyExternalScript : GH_ScriptInstance
                     {
                         for (int i = JointAngles.Count - 1; i >= 0; i--)
                         {
-                            double angle = getAngle(i, target.XAxis, EndFrame.XAxis);
-                            RotateJoint(i, angle);
+                            int steps = 0;
+
+                            double angle = getAngle(i, target.XAxis, EndFrame.XAxis, out steps);
+                            MoveJoint(i, angle, steps);
+
                             if (TestCollision)
                             {
                                 SaveState(ref robotStates, false, "bump");
@@ -769,8 +782,11 @@ public partial class MyExternalScript : GH_ScriptInstance
                     {
                         for (int i = 0; i < JointAngles.Count; i++)           // Position for each axis-----ORIGIN  
                         {
-                            double angle = getAngle(i, target.Origin, EndFrame.Origin);
-                            RotateJoint(i, angle);
+                            int steps = 0;
+
+                            double angle = getAngle(i, target.Origin, EndFrame.Origin, out steps);
+                            MoveJoint(i, angle, steps);
+
                             if (TestCollision)
                             {
                                 SaveState(ref robotStates, false, "bump");
@@ -786,14 +802,16 @@ public partial class MyExternalScript : GH_ScriptInstance
                     {
                         for (int i = JointAngles.Count - 1; i >= 0; i--)           // Position for each axis-----ORIGIN  
                         {
-                            double angle = getAngle(i, target.Origin, EndFrame.Origin);
-                            RotateJoint(i, angle);
+                            int steps = 0;
+
+                            double angle = getAngle(i, target.Origin, EndFrame.Origin, out steps);
+                            MoveJoint(i, angle, steps);
+
                             if (TestCollision)
                             {
                                 SaveState(ref robotStates, false, "bump");
                                 if (Collision(i)) RotateJoint(i, -angle);
                                 SaveState(ref robotStates, false, "de-bump");
-
                             }
                         }
                     }
@@ -802,7 +820,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations++;
             TotalIterations++;
         }
-        private double getAngle(int joint, Point3d target, Point3d end)
+        private double getAngle(int joint, Point3d target, Point3d end, out int stepsThisMove)
         {
             Vector3d jointToEnd = new Vector3d(end - OrientationPlanes[joint + 1].Origin);
             Vector3d jointToGoal = new Vector3d(target - OrientationPlanes[joint + 1].Origin);
@@ -811,9 +829,24 @@ public partial class MyExternalScript : GH_ScriptInstance
             if (angle > Math.PI) angle = angle - (2 * Math.PI);
             if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
                 angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
+            stepsThisMove = 0;
+            if (LimitStep)
+            {
+                //double angleMax = Math.Asin(CollisionRadius / (2 * OrientationPlanes[joint].Origin.DistanceTo(OrientationPlanes[joint].ClosestPoint(EndPoint))));
+
+                if (Math.Abs(angle) > maxAngles[joint])
+                {
+                    stepsThisMove = Math.Abs((int)(angle / maxAngles[joint]));
+                    angle = angle % maxAngles[joint];
+
+                    //if (angle < 0) angle = -maxAngles[joint];
+                    //else angle = maxAngles[joint];
+                    SaveFlag = true;
+                }
+            }
             return angle;
         }
-        private double getAngle(int joint, Vector3d target, Vector3d end)
+        private double getAngle(int joint, Vector3d target, Vector3d end, out int stepsThisMove)
         {
             double angle = Vector3d.VectorAngle(end, target, OrientationPlanes[joint + 1]);
 
@@ -824,18 +857,24 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             angle = angle * (1 - Math.Abs(end * OrientationPlanes[joint + 1].Normal));
             angle = angle * (1 - Math.Abs(target * OrientationPlanes[joint + 1].Normal));
+            stepsThisMove = 0;
             if (LimitStep)
             {
                 //double angleMax = Math.Asin(CollisionRadius / (2 * OrientationPlanes[joint].Origin.DistanceTo(OrientationPlanes[joint].ClosestPoint(EndPoint))));
 
-                if (Math.Abs(angle) > maxAngles[joint + 1])
+                if (Math.Abs(angle) > maxAngles[joint])
                 {
-                    if (angle < 0) angle = -maxAngles[joint + 1];
-                    else angle = maxAngles[joint + 1];
+                    stepsThisMove = Math.Abs((int)(angle / maxAngles[joint]));
+
+                    //RhinoApp.Write("{0} x {1} + {2} ", stepsThisMove, maxAngles[joint], (angle % maxAngles[joint]).ToString());
+                    //RhinoApp.WriteLine("= {0}", angle);
+                    angle = angle % maxAngles[joint];
+                    //if (angle < 0) angle = -maxAngles[joint];
+                    //else angle = maxAngles[joint];
                     SaveFlag = true;
                 }
             }
-            if (TestCollision1)
+            if (false)
             {
                 foreach (Line line in SkeletonEnd(joint))
                 {
@@ -902,6 +941,38 @@ public partial class MyExternalScript : GH_ScriptInstance
 
         //    }
         //}
+        public void MoveJoint(int joint, double angle, int steps)
+        {
+            for (int j = 0; j < steps; j++)
+            {
+                if (angle < 0)
+                {
+                    RotateJoint(joint, -maxAngles[joint]);
+                    if (TestCollision1 && Collision(joint))
+                    {
+                        //RotateJoint(joint, maxAngles[joint]);
+                        Collisions++;
+                        break;
+                    }
+                }
+                else
+                {
+                    RotateJoint(joint, maxAngles[joint]);
+                    if (TestCollision1 && Collision(joint))
+                    {
+                        //RotateJoint(joint, -maxAngles[joint]);
+                        Collisions++;
+                        break;
+                    }
+                }
+                //SaveState(ref robotSteps, false, "limited step");
+            }
+            RotateJoint(joint, angle);
+            if (TestCollision1 && Collision(joint)) Collisions++;
+            //RotateJoint(joint, -angle);
+
+        }
+
         public void RotateJoint(int joint, double angle)
         {
             var rotate = Transform.Rotation(angle, OrientationPlanes[joint + 1].Normal, OrientationPlanes[joint + 1].Origin);
