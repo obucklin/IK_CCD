@@ -202,14 +202,8 @@ public partial class MyExternalScript : GH_ScriptInstance
     double AnimateTime = 0;
 
     DisplayMaterial material;
-    public class IK_Solver
-    {
 
-
-
-
-    }
-    public class Robot : IK_Solver
+    public class Robot
     {
         private List<Line> originalAxes = new List<Line>();
         private DataTree<double> jointRange = new DataTree<double>();
