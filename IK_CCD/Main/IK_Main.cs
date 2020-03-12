@@ -74,7 +74,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         }
         else
         {
-            if (str.struts.Count < 1) str = new Structure(structure);
+            if (str.Count < 1) str = new Structure(structure);
             if (!bot.IsSet)
             {
                 bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
@@ -106,7 +106,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 {
                     if (orient)
                     {
-                        bot.GoalSolved = bot.Solve_Path(targetPlane, str, true, false);
+                        bot.GoalSolved = bot.GoTo(targetPlane, str, true, false);
                     }
                 }
                 IKTime = stopwatch.ElapsedMilliseconds;
@@ -125,7 +125,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 stepInternal = step;
             }
 
-            List<Robot.RobotState> stepsOut = new List<Robot.RobotState>(bot.RobotSteps);
+            List<Robot.RobotState> stepsOut = new List<Robot.RobotState>(bot.RobotStates);
 
             if (stepInternal >= stepsOut.Count) stepInternal = stepsOut.Count - 1;
             if (stepInternal < 0) stepInternal = 0;
@@ -153,9 +153,9 @@ public partial class MyExternalScript : GH_ScriptInstance
             EndPlane = bot.EndFrame;
             Bodies = bot.Bodies;
             TargetPlane = bot.TargetFrame;
-            if (bot.Paths[path].Count > 0) PathPlanes = bot.Paths[path].planes;
+            if (bot.Paths[path].Count > 0) PathPlanes = bot.Paths[path].Planes;
             Solved = stepsOut[stepInternal].StateSolved;
-            TestOut = bot.testOut;
+            TestOut = str.testOut;
         }
 
 
@@ -236,7 +236,7 @@ public partial class MyExternalScript : GH_ScriptInstance
         private bool isSet = false;
         private bool ran = false;
         private bool testCollision = false;
-        private bool testCollision1 = true;
+        private bool testCollision1 = false;
         private bool limitStep = true;
         private bool saveFlag = false;
         private bool lastFlag = false;
@@ -435,16 +435,16 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations = 0;
             return success;
         }
-        public bool TestDistance(Structure.Strut strut, double threshhold = 1, int maxIterations = 50)            // Location Only
+        public bool TestDistance(Structure.PathStrut strut, double threshhold = 1, int maxIterations = 50)            // Location Only
         {
-            TargetFrame = strut.targetPlanes[0];
+            TargetFrame = strut.TargetPlanes[0];
             bool success = false;
-            for (int i = 0; i < 5; i++) stepCCD(strut.walkEnd, true);
+            for (int i = 0; i < 5; i++) stepCCD(strut.WalkEnd, true);
             SaveState(ref robotStates, success, "try WalkEnd");
 
             while (Iterations < maxIterations && !success)
             {
-                targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                targetFrame.Origin = strut.StrutLine.ClosestPoint(EndFrame.Origin, true);
                 stepCCD(TargetFrame.Origin, true);
                 if (DistError < threshhold) success = true;
             }
@@ -455,11 +455,11 @@ public partial class MyExternalScript : GH_ScriptInstance
         public bool Collision(int joint)
         {
             bool collision = true;
-            for (int i = joint+1; i < OrientationPlanes.Count - 1; i++)
+            for (int i = joint + 1; i < OrientationPlanes.Count - 1; i++)
             {
-                foreach (int collisionRiskIndex in RobotStructure.struts[CurrentStrut].collisionRisks)
+                foreach (Structure.Strut collisionRisk in RobotStructure[CurrentStrut].CollisionRisks)
                 {
-                    if (RobotStructure.struts[collisionRiskIndex].strutLine.MinimumDistanceTo(new Line(OrientationPlanes[i].Origin, OrientationPlanes[i + 1].Origin)) < CollisionRadius) collision = true;
+                    if (collisionRisk.StrutLine.MinimumDistanceTo(new Line(OrientationPlanes[i].Origin, OrientationPlanes[i + 1].Origin)) < CollisionRadius) collision = true;
                 }
             }
             return collision;
@@ -516,66 +516,25 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations = 0;
             return success;
         }
-        public bool Solve_IK(Structure.Strut strut, Point3d nextTarget, bool record = false, int earlyBreak = 0)            //  with orientation
-        {
-            var rot = Transform.Rotation(Math.PI / 2, strut.basePlane.XAxis, strut.basePlane.Origin);
-            bool success = false;
-            if (TestDistance(strut))
-            {
-                Vector3d strutToBot = new Vector3d(strut.strutLine.ClosestPoint(OrientationPlanes[1].Origin, false) - OrientationPlanes[1].Origin);
-                strutToBot.Unitize();
-                Vector3d strutToNextTarget = new Vector3d(strut.strutLine.ClosestPoint(nextTarget, false) - nextTarget);
-                strutToNextTarget.Unitize();
-                List<Plane> targets = new List<Plane>();
-                foreach (Plane p in strut.targetPlanes) targets.Add(new Plane(p));
-                targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strutToBot + strutToNextTarget), v.Normal)).ToList();
-                int rotations = 0;
-                while (!success && rotations < 4)
-                {
-                    TargetFrame = targets[rotations];
-                    targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
-                    int k = 0;
-                    while (Iterations < MaxIterations && !success)
-                    {
-                        if (Iterations % 16 == 14) targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
-                        stepCCD(TargetFrame);
-                        if (record && Iterations == Math.Pow(2, k))
-                        {
-                            SaveState(ref robotStates, false);
-                            k++;
-                        }
-                        if (earlyBreak > 0 && Iterations == ((earlyBreak * 4) - 1) && (DistError > 10 || NormalError > 0.2)) break;
-                        if (DistError < DistThreshhold && AngleError < AngleThreshhold) success = true;
-                    }
-                    rotations++;
-                    SaveState(ref robotStates, success, "solveIK_Strut");
-                    Iterations = 0;
-                }
-            }
-            if (success) SaveState(ref robotStates, success, "solveIK_Strut");
-            Iterations = 0;
-            return success;
-        }
-
-        public bool GrabStrut(Structure.Strut strut, Point3d nextTarget, bool offsetSteps, bool record = false, int earlyBreak = 0)            //  with orientation
+        public bool GrabStrut(Structure.PathStrut strut, Point3d nextTarget, bool offsetSteps, bool record = false, int earlyBreak = 0)            //  with orientation
         {
             bool success = false;
             if (TestDistance(strut))
             {
-                Vector3d strutToBot = new Vector3d(strut.strutLine.ClosestPoint(OrientationPlanes[1].Origin, false) - OrientationPlanes[1].Origin);
+                Vector3d strutToBot = new Vector3d(strut.StrutLine.ClosestPoint(OrientationPlanes[1].Origin, false) - OrientationPlanes[1].Origin);
                 strutToBot.Unitize();
-                Vector3d strutToNextTarget = new Vector3d(strut.strutLine.ClosestPoint(nextTarget, false) - nextTarget);
+                Vector3d strutToNextTarget = new Vector3d(strut.StrutLine.ClosestPoint(nextTarget, false) - nextTarget);
                 strutToNextTarget.Unitize();
                 List<Plane> targets = new List<Plane>();
-                foreach (Plane p in strut.targetPlanes) targets.Add(new Plane(p));
+                foreach (Plane p in strut.TargetPlanes) targets.Add(new Plane(p));
                 targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strutToBot + strutToNextTarget), v.Normal)).ToList();
                 int rotations = 0;
                 while (!success && rotations < 4)           //try each side of strut
                 {
                     TargetFrame = targets[rotations];
-                    Line offsetLine = new Line(strut.strutLine.From - (targets[rotations].Normal) * 1.5 * CollisionRadius, strut.strutLine.To - (targets[rotations].Normal) * CollisionRadius);
+                    Line offsetLine = new Line(strut.StrutLine.From - (targets[rotations].Normal) * 1.5 * CollisionRadius, strut.StrutLine.To - (targets[rotations].Normal) * CollisionRadius);
                     if (offsetSteps) targetFrame.Origin = offsetLine.ClosestPoint(EndFrame.Origin, true);
-                    else targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                    else targetFrame.Origin = strut.StrutLine.ClosestPoint(EndFrame.Origin, true);
                     TestDistance(TargetFrame.Origin);
 
                     int k = 0;
@@ -584,7 +543,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         if (Iterations % 16 == 14)
                         {
                             if (offsetSteps) targetFrame.Origin = offsetLine.ClosestPoint(EndFrame.Origin, true);
-                            else targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                            else targetFrame.Origin = strut.StrutLine.ClosestPoint(EndFrame.Origin, true);
                         }
                         stepCCD(TargetFrame);
                         if (record && Iterations == Math.Pow(2, k))
@@ -601,7 +560,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                 }
                 if (success && offsetSteps)
                 {
-                    targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                    targetFrame.Origin = strut.StrutLine.ClosestPoint(EndFrame.Origin, true);
                     success = false;
                     offsetSteps = false;
 
@@ -609,7 +568,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                     {
                         if (Iterations % 16 == 14)
                         {
-                            targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                            targetFrame.Origin = strut.StrutLine.ClosestPoint(EndFrame.Origin, true);
                         }
                         stepCCD(TargetFrame);
                         if (DistError < DistThreshhold && AngleError < AngleThreshhold) success = true;
@@ -624,31 +583,28 @@ public partial class MyExternalScript : GH_ScriptInstance
             Iterations = 0;
             return success;
         }
-
-
-
-        public bool Solve_Path(Plane target, Structure structure, bool offsetSteps, bool record = false)            // on Line Only
+        public bool GoTo(Plane target, Structure structure, bool offsetSteps, bool record = false)            // on Line Only
         {
 
-            RhinoApp.WriteLine("Solving Path");
             Stopwatch sw = new Stopwatch();
             sw.Restart();
-            RobotStructure = structure;
-            Paths = RobotStructure.GetPaths(RootFrame, GoalFrame, 200, 360);
-            RhinoApp.WriteLine("Path Solver Time = {0}", sw.ElapsedMilliseconds);
+            RhinoApp.WriteLine("Solving Path");
 
+            Paths = structure.GetPaths(RootFrame, GoalFrame, 200, 360);
+            //foreach (Structure.Path path in Paths) path.PrintPath();
             bool success = false;
             GoalFrame = target;
             int i = 0;
             sw.Restart();
-            foreach (Structure.Path path in paths)
+            foreach (Structure.Path path in Paths)
             {
+                for (int j = 0; j < path.Count; j++)  testOut.Add(path[j].StrutLine);
                 i++;
-                while (CurrentStrut < path.struts.Count && Steps < 50 && Tries < 50)         // try to reach goal following path
+                while (CurrentStrut < path.Count && Steps < 50 && Tries < 50)         // try to reach goal following path
                 {
-                    if (CurrentStrut < path.struts.Count - 1)                                //if not on last strut
+                    if (CurrentStrut < path.Count - 1)                                //if not on last strut
                     {
-                        StepSolved = GrabStrut(path.struts[CurrentStrut + 1], OrientationPlanes[OrientationPlanes.Count - 2].Origin, offsetSteps, false, 200);
+                        StepSolved = GrabStrut(path[CurrentStrut + 1], OrientationPlanes[OrientationPlanes.Count - 2].Origin, offsetSteps, false, 200);
                         if (StepSolved)         //try to reach next strut
                         {
                             CurrentStrut++;
@@ -658,7 +614,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         }
                         else        //else step on this strut
                         {
-                            StepSolved = GrabStrut(path.struts[CurrentStrut], path.struts[CurrentStrut + 1].walkEnd, offsetSteps, false, 200);
+                            StepSolved = GrabStrut(path[CurrentStrut], path[CurrentStrut + 1].WalkEnd, offsetSteps, false, 200);
                             if (StepSolved)
                             {
                                 SaveState(ref robotSteps, StepSolved, "solveIK_Strut");
@@ -678,7 +634,7 @@ public partial class MyExternalScript : GH_ScriptInstance
                         }
                         else
                         {
-                            StepSolved = GrabStrut(path.struts[CurrentStrut], goalFrame.Origin, offsetSteps, false, 200);        //else step on this strut
+                            StepSolved = GrabStrut(path[CurrentStrut], goalFrame.Origin, offsetSteps, false, 200);        //else step on this strut
                             if (StepSolved)
                             {
                                 SaveState(ref robotSteps, StepSolved, "solveIK_Strut");
@@ -868,50 +824,50 @@ public partial class MyExternalScript : GH_ScriptInstance
                     SaveFlag = true;
                 }
             }
-            if (false)
-            {
-                foreach (Line line in SkeletonEnd(joint))
-                {
-                    foreach (int index in RobotStructure.struts[CurrentStrut].collisionRisks)
-                    {
-                        double skelT, strT;
-                        var intersect = Rhino.Geometry.Intersect.Intersection.LineLine(line, RobotStructure.struts[index].strutLine, out skelT, out strT, collisionRadius * 2, true);
-                        if (intersect)
-                        {
-                            Collisions++;
-                            testOut.Add(new Line(line.PointAt(skelT), RobotStructure.struts[index].strutLine.PointAt(strT)));
-                        }
-                    }
-                }
-            }
+            //if (false)
+            //{
+            //    foreach (Line line in SkeletonEnd(joint))
+            //    {
+            //        foreach (int index in RobotStructure[CurrentStrut].CollisionRisks)
+            //        {
+            //            double skelT, strT;
+            //            var intersect = Rhino.Geometry.Intersect.Intersection.LineLine(line, RobotStructure[index].StrutLine, out skelT, out strT, collisionRadius * 2, true);
+            //            if (intersect)
+            //            {
+            //                Collisions++;
+            //                testOut.Add(new Line(line.PointAt(skelT), RobotStructure[index].strutLine.PointAt(strT)));
+            //            }
+            //        }
+            //    }
+            //}
 
             return angle;
         }
-        private double getAngleCollision(int joint, Point3d target, Point3d end)
-        {
-            Vector3d jointToEnd = new Vector3d(end - OrientationPlanes[joint + 1].Origin);
-            Vector3d jointToGoal = new Vector3d(target - OrientationPlanes[joint + 1].Origin);
-            double angle = Vector3d.VectorAngle(jointToEnd, jointToGoal, OrientationPlanes[joint + 1]);
+        //private double getAngleCollision(int joint, Point3d target, Point3d end)
+        //{
+        //    Vector3d jointToEnd = new Vector3d(end - OrientationPlanes[joint + 1].Origin);
+        //    Vector3d jointToGoal = new Vector3d(target - OrientationPlanes[joint + 1].Origin);
+        //    double angle = Vector3d.VectorAngle(jointToEnd, jointToGoal, OrientationPlanes[joint + 1]);
 
-            Vector3d correctionVector = new Vector3d();
-            Point3d strutCP, skelCP;
-            int whichOne;
-            List<GeometryBase> strutLines = new List<GeometryBase>();
-            foreach (int index in RobotStructure.struts[CurrentStrut].collisionRisks) strutLines.Add(new LineCurve(RobotStructure.struts[index].strutLine));
-            //SkeletonEnd(joint).ClosestPoints(strutLines, out skelCP, out strutCP, out whichOne);
-            //correctionVector = new Vector3d(skelCP - strutCP);
-            correctionVector.Unitize();
-            //correctionVector *= CollisionRadius - skelCP.DistanceTo(strutCP);
-
-
+        //    Vector3d correctionVector = new Vector3d();
+        //    Point3d strutCP, skelCP;
+        //    int whichOne;
+        //    List<GeometryBase> strutLines = new List<GeometryBase>();
+        //    foreach (int index in RobotStructure[CurrentStrut].CollisionRisks) strutLines.Add(new LineCurve(RobotStructure[index].StrutLine));
+        //    //SkeletonEnd(joint).ClosestPoints(strutLines, out skelCP, out strutCP, out whichOne);
+        //    //correctionVector = new Vector3d(skelCP - strutCP);
+        //    correctionVector.Unitize();
+        //    //correctionVector *= CollisionRadius - skelCP.DistanceTo(strutCP);
 
 
-            if (angle < Math.PI * (-2) || angle > Math.PI * (2)) angle = 0;
-            if (angle > Math.PI) angle = angle - (2 * Math.PI);
-            if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
-                angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
-            return angle;
-        }
+
+
+        //    if (angle < Math.PI * (-2) || angle > Math.PI * (2)) angle = 0;
+        //    if (angle > Math.PI) angle = angle - (2 * Math.PI);
+        //    if (JointRanges.Branch(new GH_Path(joint))[0] != 0 && (JointRanges.Branch(new GH_Path(joint))[0] > (JointAngles[joint] + angle) || (JointAngles[joint] + angle) > JointRanges.Branch(new GH_Path(joint))[1]))
+        //        angle = JointRanges.Branch(new GH_Path(joint))[1] - JointAngles[joint];
+        //    return angle;
+        //}
 
         private double getAngleCollision(int joint, Vector3d target, Vector3d end)
         {
@@ -928,13 +884,7 @@ public partial class MyExternalScript : GH_ScriptInstance
 
             return angle;
         }
-        //public void getAngleAvoid(int joint, Point3d target, Point3d end)
-        //{
-        //    for (int i = joint; i < Skeleton.Count; i++)
-        //    {
 
-        //    }
-        //}
         public void MoveJoint(int joint, double angle, int steps)
         {
             for (int j = 0; j < steps; j++)
@@ -1072,11 +1022,12 @@ public partial class MyExternalScript : GH_ScriptInstance
 
     public class Structure
     {
-        public List<Polyline> structure = new List<Polyline>();
-        public List<Strut> struts = new List<Strut>();
+        private List<Polyline> _polylines = new List<Polyline>();
+        private List<Strut> _struts = new List<Strut>();
         public List<object> testOut = new List<object>();
-        public List<List<int>> neighborTree = new List<List<int>>();
 
+        public Strut this[int i] { get { return _struts[i]; } }
+        public int Count { get { return _struts.Count; } }
         public Structure()
         {
         }
@@ -1084,82 +1035,74 @@ public partial class MyExternalScript : GH_ScriptInstance
         {
             for (int i = 0; i < inputCurves.Count; i++)
             {
-                struts.Add(new Strut(inputCurves[i], i));
+                _struts.Add(new Strut(inputCurves[i], i));
             }
-            foreach (Strut strut in struts)
+            foreach (Strut strut in _struts)
             {
-                strut.getNeighbors(200, 360, struts);
-                neighborTree.Add(strut.neighbors);
+                strut.getNeighbors(200, 360, _struts);
+                //RhinoApp.Write("neighborCount = {0}", strut.Neighbors.Count);
             }
 
         }
 
-        public void printListList(List<List<int>> data)
-        {
-            for (int i = 0; i < data.Count; i++)
-            {
-                RhinoApp.Write("path {0}:", i);
 
-                foreach (int j in data[i])
-                {
-                    RhinoApp.Write(j.ToString());
-                    RhinoApp.Write(" , ");
-                }
-                RhinoApp.WriteLine();
-            }
-        }
 
         public List<Path> GetPaths(Plane startPlane, Plane targetPlane, double maxDistance, double collisionDist)
         {
-            List<Path> Paths = new List<Path>();
-            int startIndex = struts.OrderBy(s => s.strutLine.DistanceTo(startPlane.Origin, true)).ToList()[0].index;
+            foreach (Strut s in _struts) testOut.Add(s.StrutLine);
+            List<Path> pathsOut = new List<Path>();
+            PathStrut startStrut = new PathStrut(_struts.OrderBy(s => s.StrutLine.DistanceTo(startPlane.Origin, true)).ToList()[0]);
+            RhinoApp.WriteLine(" startStrut.Neighbors.count = {0}", startStrut.Neighbors.Count);
 
-            struts[startIndex].walkStart = struts[startIndex].strutLine.ClosestPoint(startPlane.Origin, true);
-            int targetIndex = struts.OrderBy(s => s.strutLine.DistanceTo(targetPlane.Origin, true)).ToList()[0].index;
+            PathStrut targetStrut = new PathStrut(_struts.OrderBy(s => s.StrutLine.DistanceTo(targetPlane.Origin, true)).ToList()[0]);
+            testOut.Add(startStrut.StrutLine);
+            pathsOut.Add(new Path());
+            pathsOut[0].Add(startStrut);
 
-            if (startIndex == targetIndex)
-            {
-                Paths.Add(new Path());
-                Paths[0].Add(struts[targetIndex]);
-            }
+            if (startStrut == targetStrut) return pathsOut; 
             else
             {
 
-                List<List<int>> pathsOut = new List<List<int>>();
-
-
-                pathsOut.Add(new List<int>());
-                pathsOut[0].Add(startIndex);
 
                 int breaker = 0;
                 int currentPath = 0;
                 do
                 {
+                    pathsOut[currentPath].PrintPath();
                     bool connected = false;
                     bool deadEnd = false;
                     while (!connected && !deadEnd)  // keep working on same path
                     {
-                        if (pathsOut[currentPath].Last() == targetIndex)
+                        RhinoApp.WriteLine("lastIndex = {0}", pathsOut[currentPath].EndStrut.index);
+
+                        if (pathsOut[currentPath].EndStrut.index == targetStrut.index)
                         {
+
                             connected = true;
+                            pathsOut[currentPath].getWalkPoints(targetPlane.Origin);
+                            pathsOut[currentPath].PrintPath();
                             currentPath++;
                             break;
+
                         }
+                        RhinoApp.WriteLine(" pathsOut[currentPath].EndStrut.Neighbors.count = {0}", pathsOut[currentPath].EndStrut.Neighbors.Count);
+
                         bool oneDone = false;
-                        foreach (int testIndex in neighborTree[pathsOut[currentPath].Last()])
+                        foreach (Strut testStrut in pathsOut[currentPath].EndStrut.Neighbors)
                         {
-                            if (!pathsOut[currentPath].Contains(testIndex))                //no looping
+
+                            if (!pathsOut[currentPath].Contains(testStrut))                //no looping
                             {
                                 if (!oneDone)                                    //first one, add to current path
                                 {
-                                    pathsOut[currentPath].Add(testIndex);
+                                    pathsOut[currentPath].Add(testStrut);
                                     oneDone = true;
                                 }
                                 else                                        // not first one... make new path
                                 {
-                                    List<int> pathTemp = new List<int>(pathsOut[currentPath]);
-                                    pathTemp[pathTemp.Count - 1] = testIndex;
-                                    pathsOut.Add(new List<int>(pathTemp));
+                                    Path pathTemp = new Path(pathsOut[currentPath]);
+                                    pathTemp[pathTemp.Count - 1] = new PathStrut(testStrut);
+                                    pathsOut.Add(new Path(pathTemp));
                                 }
                             }
                         }
@@ -1174,60 +1117,85 @@ public partial class MyExternalScript : GH_ScriptInstance
                 } while (pathsOut.Count > currentPath && breaker < 100);
 
                 pathsOut = pathsOut.OrderBy(l => l.Count).ToList();
-                printListList(pathsOut);
-                foreach (List<int> path in pathsOut)
-                {
-                    Path thisPath = new Path();
-                    foreach (int i in path)
-                    {
-                        thisPath.Add(new Strut(struts[i]));
-                    }
-                    Paths.Add(thisPath);
-                }
-
-
-
-                foreach (Path path in Paths)
-                {
-                    for (int i = 0; i < path.Count - 1; i++)
-                    {
-                        Point3d thisPoint = new Point3d();
-                        Point3d nextPoint = new Point3d();
-                        LineCurve thisLine = new LineCurve(path.struts[i].strutLine);
-                        LineCurve nextLine = new LineCurve(path.struts[i + 1].strutLine);
-                        thisLine.ClosestPoints(nextLine, out thisPoint, out nextPoint);
-                        path.struts[i].walkEnd = thisPoint;
-                    }
-                    path.struts[path.struts.Count - 1].walkEnd = path.struts[path.struts.Count - 1].strutLine.ClosestPoint(targetPlane.Origin, true);
-                }
             }
-            return Paths;
+            return pathsOut;
         }
 
-        public class Strut : Structure
+
+        public class PathStrut 
         {
-            public Plane basePlane;
-            public double length;
-            public Line strutLine;
+            private Strut _strut;
+            private Point3d walkStart;
+            private Point3d walkEnd;
+
+
+            public int index { get { return _strut.index; } }
+
+            public Plane BasePlane { get { return _strut.BasePlane; } }
+
+            public List<Strut> Neighbors { get { return _strut.Neighbors; } set { _strut.Neighbors = value; } }
+
+            public List<Plane> TargetPlanes { get { return _strut.TargetPlanes; } set { _strut.TargetPlanes = value; } }
+
+            public List<Strut> CollisionRisks { get { return _strut.CollisionRisks; } set { _strut.CollisionRisks = value; } }
+
+            public Line StrutLine { get { return _strut.StrutLine; } }
+
+            public Point3d WalkStart { get { return walkStart; }  set { walkStart = value; } }
+            public Point3d WalkEnd { get { return walkEnd; }  set { walkEnd = value; } } 
+
+            public PathStrut()
+            { }
+            public PathStrut(Strut strut)
+            {
+                _strut = new Strut(strut);
+            }
+            public PathStrut(PathStrut pathStrut)
+            {
+                _strut = new Strut(pathStrut._strut);
+
+                WalkStart = pathStrut.WalkStart;
+                WalkEnd = pathStrut.WalkEnd;
+            }
+            public PathStrut(Strut strut, Point3d lastCP, Point3d nextCP)
+            {
+                _strut = new Strut(strut);
+                WalkStart = lastCP;
+                WalkEnd = nextCP;
+            }
+
+        }
+
+        public class Strut 
+        {
+            private readonly Plane _basePlane;
+            private readonly Line _strutLine;
             public int index;
-            public Point3d walkStart;
-            public Point3d walkEnd;
-            public List<Plane> targetPlanes = new List<Plane>();
-            public List<int> neighbors = new List<int>();
-            public List<int> collisionRisks = new List<int>();
+
+            private List<Plane> _targetPlanes = new List<Plane>();
+            private List<Strut> _neighbors = new List<Strut>();
+            private List<Strut> _collisionRisks = new List<Strut>();
+
+
+            public Plane BasePlane { get { return _basePlane; } }
+
+            public List<Strut> Neighbors { get { return _neighbors; }  set { _neighbors = value; } }
+
+            public List<Plane> TargetPlanes { get { return _targetPlanes; }  set { _targetPlanes = value; } }
+
+            public List<Strut> CollisionRisks { get { return _collisionRisks; }  set { _collisionRisks = value; } }
+
+            public Line StrutLine { get { return _strutLine; } }
 
             public Strut()
             {
             }
             public Strut(Strut strutIn)
             {
-                basePlane = new Plane(strutIn.basePlane);
-                length = strutIn.length;
-                strutLine = strutIn.strutLine;
+                _basePlane = new Plane(strutIn.BasePlane);
+                _strutLine = strutIn._strutLine;
                 index = strutIn.index;
-                walkStart = new Point3d(strutIn.walkStart);
-                walkEnd = new Point3d(strutIn.walkEnd);
-                foreach (Plane p in strutIn.targetPlanes) targetPlanes.Add(new Plane(p));
+                foreach (Plane p in strutIn.TargetPlanes) TargetPlanes.Add(new Plane(p));
             }
             public Strut(Polyline inputCurve, int indexIn)
             {
@@ -1246,78 +1214,105 @@ public partial class MyExternalScript : GH_ScriptInstance
                     strutEnd = inputCurve[2];
                     yPoint = inputCurve[0];
                 }
-                basePlane = new Plane(origin, strutEnd, yPoint);
-                length = origin.DistanceTo(strutEnd);
-                strutLine = new Line(origin, strutEnd);
+                _basePlane = new Plane(origin, strutEnd, yPoint);
+                _strutLine = new Line(origin, strutEnd);
                 index = indexIn;
                 for (int i = 0; i < 4; i++)
                 {
-                    Plane baseTemp = new Plane(basePlane);
-                    var rot = Transform.Rotation(i * Math.PI / 2, basePlane.XAxis, basePlane.Origin);
+                    Plane baseTemp = new Plane(BasePlane);
+                    var rot = Transform.Rotation(i * Math.PI / 2, baseTemp.XAxis, baseTemp.Origin);
                     baseTemp.Transform(rot);
-                    targetPlanes.Add(baseTemp);
+                    TargetPlanes.Add(baseTemp);
                 }
             }
 
+
             public void getNeighbors(double maxDistance, double collisionDist, List<Strut> struts)
             {
-                LineCurve thisLine = new LineCurve(strutLine);
+                LineCurve thisLine = new LineCurve(StrutLine);
                 foreach (Strut strut in struts)
                 {
-                    if (index != strut.index && !collisionRisks.Contains(strut.index) && !neighbors.Contains(strut.index))
+                    if (index != strut.index && !CollisionRisks.Contains(strut) && !Neighbors.Contains(strut))
                     {
                         Point3d thisPoint = new Point3d();
                         Point3d nextPoint = new Point3d();
-                        LineCurve nextLine = new LineCurve(strut.strutLine);
+                        LineCurve nextLine = new LineCurve(strut.StrutLine);
                         thisLine.ClosestPoints(nextLine, out thisPoint, out nextPoint);
                         double dist = thisPoint.DistanceTo(nextPoint);
 
                         if (dist < maxDistance)
                         {
-                            neighbors.Add(strut.index);
+                            Neighbors.Add(strut); 
+
                         }
                         if (dist < collisionDist)
                         {
-                            collisionRisks.Add(strut.index);
+                            CollisionRisks.Add(strut);
+
                         }
                     }
+                    RhinoApp.WriteLine(" strut.Neighbors.count = {0}", strut.Neighbors.Count);
+
                 }
             }
         }
-        public class Path
+        public class Path : Structure
         {
-            public List<Strut> struts = new List<Strut>();
-            public List<int> indexList = new List<int>();
-            public List<Plane> planes = new List<Plane>();
-            public Strut endStrut { get { return struts.Last(); } }
-            public int Count { get { return struts.Count; } }
-            public List<Line> connectorLines
+            private List<PathStrut> _pathStruts = new List<PathStrut>();
+            private List<Plane> _planes = new List<Plane>();
+            public new PathStrut this[int i] { get { return _pathStruts[i]; } set { _pathStruts[i] = new PathStrut(value); } }
+            public PathStrut EndStrut { get { return _pathStruts.Last(); } }
+            public new int Count { get { return _pathStruts.Count; } }
+            public List<Plane> Planes { get { return _planes; }  set { _planes = value; } }
+            public bool Contains(Strut strut)
             {
-                get
+                foreach (PathStrut pathStrut in _pathStruts)
                 {
-                    List<Line> linestemp = new List<Line>();
-                    for (int i = 0; i < struts.Count - 1; i++)
-                    {
-                        Line cl = new Line(struts[i].walkEnd, struts[i + 1].walkStart);
-                        linestemp.Add(cl);
-                    }
-                    return linestemp;
+                    if (strut.index == pathStrut.index) return true;
                 }
+                return false;
+            }
+            public Path() { }
+            public Path(Path path) 
+            {
+                for (int i = 0; i < path.Count; i++)
+                {
+                    _pathStruts.Add(new PathStrut(path[i]));
+                }                
             }
 
-            public Path() { }
-
+            public void Add(Strut strut, Point3d lastCP, Point3d nextCP)
+            {
+                _pathStruts.Add(new PathStrut(strut, lastCP, nextCP));
+            }
             public void Add(Strut strut)
             {
-                struts.Add(strut);
-                indexList.Add(strut.index);
-                planes.Add(strut.basePlane);
+                _pathStruts.Add(new PathStrut(strut));
+            }
+            public void Add(PathStrut strut)
+            {
+                _pathStruts.Add(new PathStrut(strut));
             }
 
             public void PrintPath()
             {
-                foreach (Strut s in struts) RhinoApp.Write("{0}..", s.index);
+                foreach (PathStrut s in _pathStruts) RhinoApp.Write("{0}..", s.index);
                 RhinoApp.WriteLine("");
+            }
+
+            public void getWalkPoints(Point3d targetPoint)
+            {
+                for (int i = 0; i < Count - 1; i++)
+                {
+                    Point3d thisPoint = new Point3d();
+                    Point3d nextPoint = new Point3d();
+                    LineCurve thisLine = new LineCurve(_pathStruts[i].StrutLine);
+                    LineCurve nextLine = new LineCurve(_pathStruts[i + 1].StrutLine);
+                    thisLine.ClosestPoints(nextLine, out thisPoint, out nextPoint);
+                    this[i].WalkEnd = thisPoint;
+                    testOut.Add(new Line(thisPoint, nextPoint));
+                }
+                this[Count - 1].WalkEnd = this[Count - 1].StrutLine.ClosestPoint(targetPoint, true);
             }
         }
     }
