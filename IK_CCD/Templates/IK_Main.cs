@@ -73,8 +73,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             material.Diffuse = Color.FromArgb(200, 200, 200);
         }
         else
-        {
-
+        { 
             if (!bot.IsSet)
             {
                 bot.InitializeBot(axes, rootFrame, endFrame, collisionDist, bodies, range, error, angleError, iterations);
@@ -162,7 +161,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             TargetPlane = bot.TargetFrame;
             if (str.paths[path].Count > 0) PathPlanes = str.paths[path].planes;
             Solved = stepsOut[stepInternal].StateSolved;
-            TestOut = str.paths[path].connectorLines;
+            TestOut = bot.testOut; // str.paths[path].connectorLines;
         }
 
 
@@ -461,13 +460,13 @@ public partial class MyExternalScript : GH_ScriptInstance
             bool success = false;
             if (TestDistance(strut))
             {
-                Vector3d strutToBot = new Vector3d(strut.strutLine.ClosestPoint(OrientationPlanes[1].Origin, false) - OrientationPlanes[1].Origin);
-                strutToBot.Unitize();
+                //Vector3d strutToBot = new Vector3d(strut.strutLine.ClosestPoint(OrientationPlanes[1].Origin, false) - OrientationPlanes[1].Origin);
+                //strutToBot.Unitize();
                 Vector3d strutToNextTarget = new Vector3d(strut.strutLine.ClosestPoint(nextTarget, false) - nextTarget);
                 strutToNextTarget.Unitize();
                 List<Plane> targets = new List<Plane>();
                 foreach (Plane p in strut.targetPlanes) targets.Add(new Plane(p));
-                targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strutToBot + strutToNextTarget), v.Normal)).ToList();
+                targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strutToNextTarget), v.Normal)).ToList();
                 int rotations = 0;
                 while (!success && rotations < 4)
                 {
@@ -477,6 +476,53 @@ public partial class MyExternalScript : GH_ScriptInstance
                     while (Iterations < MaxIterations && !success)
                     {
                         if (Iterations % 16 == 14) targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                        stepCCD(TargetFrame);
+                        if (record && Iterations == Math.Pow(2, k))
+                        {
+                            SaveState(ref robotStates, false);
+                            k++;
+                        }
+                        if (earlyBreak > 0 && Iterations == ((earlyBreak * 4) - 1) && (DistError > 10 || NormalError > 0.2)) break;
+                        if (DistError < DistThreshhold && AngleError < AngleThreshhold) success = true;
+                    }
+                    rotations++;
+                    SaveState(ref robotStates, success, "solveIK_Strut");
+                    Iterations = 0;
+                }
+            }
+            if (success) SaveState(ref robotStates, success, "solveIK_Strut");
+            Iterations = 0;
+            return success;
+        }
+        public bool Solve_IK(Structure.Strut strut, Point3d nextTarget, double offset, bool record = false, int earlyBreak = 0)            //  with orientation
+        {
+            var rot = Transform.Rotation(Math.PI / 2, strut.basePlane.XAxis, strut.basePlane.Origin);
+            bool success = false;
+            if (TestDistance(strut))
+            {
+                //Vector3d strutToBot = new Vector3d(strut.strutLine.ClosestPoint(OrientationPlanes[1].Origin, false) - OrientationPlanes[1].Origin);
+                //strutToBot.Unitize();
+                Vector3d strutToNextTarget = new Vector3d(strut.strutLine.ClosestPoint(nextTarget, false) - nextTarget);
+                strutToNextTarget.Unitize();
+                List<Plane> targets = new List<Plane>();
+                foreach (Plane p in strut.targetPlanes) targets.Add(new Plane(p));
+                targets = targets.OrderBy(v => Vector3d.VectorAngle(new Vector3d(strutToNextTarget), v.Normal)).ToList();
+                int rotations = 0;
+                while (!success && rotations < 4)
+                {
+                    TargetFrame = targets[rotations];
+                    targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
+                    testOut.Add(new Plane(targetFrame));
+                    Vector3d offsetVector = targetFrame.Origin - RootFrame.Origin;
+                    offsetVector.Unitize();
+                    targetFrame.Origin = (Point3d)(targetFrame.Origin + (offsetVector * offset)); ;
+                    testOut.Add(new Plane(targetFrame));
+                    RhinoApp.WriteLine("step with offset");
+
+                    int k = 0;
+                    while (Iterations < MaxIterations && !success)
+                    {
+                        if (Iterations > 60 && Iterations % 16 == 14) targetFrame.Origin = strut.strutLine.ClosestPoint(EndFrame.Origin, true);
                         stepCCD(TargetFrame);
                         if (record && Iterations == Math.Pow(2, k))
                         {
@@ -507,7 +553,7 @@ public partial class MyExternalScript : GH_ScriptInstance
             {
                 RhinoApp.WriteLine("path = {0}", i);
                 i++;
-                foreach (Structure.Strut s in path.struts) testOut.Add(s.walkEnd);
+                //foreach (Structure.Strut s in path.struts) testOut.Add(s.walkEnd);
                 while (CurrentStrut < path.struts.Count && Steps < 50 && Tries < 50)         // try to reach goal following path
                 {
                     if (CurrentStrut < path.struts.Count - 1)                                //if not on last strut
@@ -533,23 +579,24 @@ public partial class MyExternalScript : GH_ScriptInstance
                     }
                     else                                                        //if on last strut
                     {
-                        GoalSolved = Solve_IK(GoalFrame, false);
+                        GoalSolved = Solve_IK(GoalFrame, false);            //try to solve
                         StepSolved = GoalSolved;
                         if (GoalSolved)
                         {
-                            SaveState(ref robotSteps, true, "solveIK_Goal");
+                            SaveState(ref robotSteps, true, "solveIK_Goal");    
                             break;                                         //if not solved, go to nex path
                         }
-                        else
+                        else 
                         {
-                            StepSolved = Solve_IK(path.struts[CurrentStrut], goalFrame.Origin, false, 50);        //else step on this strut
+                            StepSolved = Solve_IK(path.struts[CurrentStrut], goalFrame.Origin + (Point3d)(goalFrame.ZAxis * (-100)), 500, false, 50);        //else step on this strut
                             if (StepSolved)
                             {
-                                SaveState(ref robotSteps, StepSolved, "solveIK_Strut");
+                                SaveState(ref robotSteps, StepSolved, "solveIK_Strut_OFFSET_Root");
                                 FlipRobot();
                             }
                             else Tries++;
                         }
+
                     }
                 }
                 if (GoalSolved)
@@ -791,6 +838,15 @@ public partial class MyExternalScript : GH_ScriptInstance
                 StateIterations = iterations;
                 StateSolved = solved;
                 StateFlipped = flipped;
+                foreach (Plane p in planes) StateOrientationPlanes.Add(new Plane(p));
+                foreach (double d in angles) StateJointAngles.Add(d);
+                Message = msg;
+            }
+            public RobotState(Plane root, List<double> angles, List<Plane> planes, string msg)
+            {
+                StateIterations = 0;
+                StateSolved = false;
+                StateFlipped = false;
                 foreach (Plane p in planes) StateOrientationPlanes.Add(new Plane(p));
                 foreach (double d in angles) StateJointAngles.Add(d);
                 Message = msg;

@@ -75,27 +75,27 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Eto">
-      <HintPath>..\..\..\..\..\..\Program Files\Rhino 6\System\Eto.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\..\Program Files\Rhino 7\System\Eto.dll</HintPath>
     </Reference>
     <Reference Include="GH_IO">
-      <HintPath>..\..\..\..\..\..\Program Files\Rhino 6\Plug-ins\Grasshopper\GH_IO.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\..\Program Files\Rhino 7\Plug-ins\Grasshopper\GH_IO.dll</HintPath>
     </Reference>
     <Reference Include="GH_Util">
-      <HintPath>..\..\..\..\..\..\Program Files\Rhino 6\Plug-ins\Grasshopper\GH_Util.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\..\Program Files\Rhino 7\Plug-ins\Grasshopper\GH_Util.dll</HintPath>
     </Reference>
     <Reference Include="Grasshopper">
-      <HintPath>..\..\..\..\..\..\Program Files\Rhino 6\Plug-ins\Grasshopper\Grasshopper.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\..\Program Files\Rhino 7\Plug-ins\Grasshopper\Grasshopper.dll</HintPath>
     </Reference>
     <Reference Include="KangarooSolver">
-      <HintPath>..\..\..\..\AppData\Roaming\Grasshopper\Libraries\KangarooSolver.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\..\Program Files\Rhino 7\Plug-ins\Grasshopper\Components\KangarooSolver.dll</HintPath>
     </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="Rhino.UI">
-      <HintPath>..\..\..\..\..\..\Program Files\Rhino 6\System\Rhino.UI.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\..\Program Files\Rhino 7\System\Rhino.UI.dll</HintPath>
     </Reference>
     <Reference Include="RhinoCommon">
-      <HintPath>..\..\..\..\..\..\Program Files\Rhino 6\System\RhinoCommon.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\..\Program Files\Rhino 7\System\RhinoCommon.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
